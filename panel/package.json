@@ -1,0 +1,20 @@
+{
+  "name": "techbookocr-tui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/main.tsx",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build": "bun run build.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@opentui/core": "0.5.14",
+    "@opentui/solid": "0.5.14",
+    "solid-js": "1.9.15"
+  }
+}

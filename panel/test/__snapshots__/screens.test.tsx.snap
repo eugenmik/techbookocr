@@ -1,0 +1,76 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`queue at 120×30: table, card, events 1`] = `
+"                                                                                                                      
+Books  4                                                                      Гиршович_Справочник по чугунному литью_…
+                                                                              ────────────────────────────────────────
+❯  Гиршович_Справочник по чугунно…  ▸ arbiter      ███████░░░  73%            753 pp · djvu · ru · fast               
+   Сафронов - Справочник по литей…  · queued       160 pp              p5                                             
+   Шишляев.Железоуглеродистые лит…  ✓ done         163 pp                       Stage        Time      s/pp           
+   asm-probe                        ✗ failed       StageAborted: 3 c…         ✓ layout      5h37m      26.9           
+                                                                              ✓ sketches    1h01m       4.9           
+                                                                              ▸ arbiter     2h11m   412/560           
+                                                                                                  ETA 1h09m           
+                                                                              · postproc        —         —           
+                                                                                                                      
+                                                                              Quality  1 issue                        
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+Recent events                                                                                                         
+──────────────────────────────────────────────────────────────────────────                                            
+23:55  Гиршович  consensus: accept 5281                                                                               
+"
+`;
+
+exports[`queue at 80×24: card hidden 1`] = `
+"                                                                              
+Books  4                                                                      
+                                                                              
+❯  Гиршович_Справочник по чугунному л…  ▸ arbiter      ███████░░░  73%        
+   Сафронов - Справочник по литейному…  · queued       160 pp              p5 
+   Шишляев.Железоуглеродистые литейны…  ✓ done         163 pp                 
+   asm-probe                            ✗ failed       StageAborted: 3 c…     
+                                                                              
+                                                                              
+                                                                              
+                                                                              
+                                                                              
+                                                                              
+                                                                              
+Recent events                                                                 
+──────────────────────────────────────────────────────────────────────────────
+23:55  Гиршович  consensus: accept 5281                                       
+"
+`;
+
+exports[`book screen: stages, issues, quality.md 1`] = `
+"                                                                                                                      
+‹ Queue   Гиршович_Справочник по чугунному литью_1978                                                                 
+          753 pp · djvu · ru · fast  ·  added 2026-10-04 14:58                                                        
+                                                                                                                      
+Stages                                            quality.md                                                          
+──────────────────────────────────────────────    ────────────────────────────────────────────────────────────────────
+  Stage        Time      s/pp                     Quality report                                                      
+✓ layout      5h37m      26.9                                                                                         
+✓ sketches    1h01m       4.9                     Time per stage                                                      
+▸ arbiter     2h11m   412/560  ███████░░░                                                                             
+                    ETA 1h09m                     - layout 5h37m                                                      
+· postproc        —         —                                                                                         
+                                                                                                                      
+Issues  1                                                                                                             
+──────────────────────────────────────────────                                                                        
+✗ 0004L (p. 8), block 2 (table): rejected, ce…                                                                        
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+                                                                                                                      
+"
+`;

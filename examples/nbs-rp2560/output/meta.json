@@ -1,0 +1,50 @@
+{
+ "title": "nbs-rp2560-p17",
+ "author": null,
+ "year": null,
+ "source": "examples/nbs-rp2560/page.pdf",
+ "lang": [
+  "en"
+ ],
+ "mode": "fast",
+ "models": {
+  "layout": "dots_mocr",
+  "arbiter": "qwen9b_arbiter"
+ },
+ "pages": 1,
+ "page_map": [
+  {
+   "scan": "0000",
+   "printed": null
+  }
+ ],
+ "quality": {
+  "pages": 1,
+  "layout_failed": 0,
+  "layer_pages": 0,
+  "vision_pending": 0,
+  "tables_pending": 0,
+  "blocks": 32,
+  "draftable": 30,
+  "arbitrated": 1,
+  "arbitration_share": 0.0333,
+  "arbiter_rejected": 1,
+  "arbiter_failed": 0,
+  "drafts_failed": 0,
+  "sketches_failed": 0,
+  "sketches": 0,
+  "misprint_fixes": 0,
+  "misprint_reverted": 0,
+  "spell_checked": 184,
+  "spell_unknown": 6,
+  "unverified": 0,
+  "kept": 0,
+  "fixes_unparsable": 0
+ },
+ "timings": {
+  "layout": 274.4,
+  "sketches": 63.3,
+  "arbiter": 113.7,
+  "assemble": 1.5
+ }
+}

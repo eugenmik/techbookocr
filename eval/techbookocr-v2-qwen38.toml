@@ -1,0 +1,127 @@
+[render]
+min_dpi = 300
+max_dpi = 600
+split_spreads = "auto"   # auto | always | never
+deskew = true
+crop_borders = true
+
+[server]
+port = 8000
+startup_timeout_s = 1200
+gpu_device = "nvidia.com/gpu=all"
+hf_cache = "~/.cache/huggingface"
+
+[pipeline]
+layout_model = "dots_mocr"
+text_model = "hunyuan"
+table_model = "chandra2"
+arbiter_model = "qwen38_ud_arbiter"
+tau_text = 0.01
+tau_halluc = 0.15
+halluc_abs_chars = 3
+crop_pad = 12
+figure_pad = 8
+min_line_px = 32
+max_upscale = 4.0
+sketch_threshold = 0.3
+transport_retries = 2
+max_consecutive_failures = 3
+lang_sample_pages = 10
+dict_dir = "~/.cache/techbookocr/hunspell"
+
+[models.dots_mocr]
+adapter = "dots"
+image = "vllm/vllm-openai:v0.30.0"
+model = "dots"
+args = ["dots-studio/dots.mocr", "--served-model-name", "dots", "--trust-remote-code",
+        "--chat-template-content-format", "string", "--gpu-memory-utilization", "0.85",
+        "--max-model-len", "32768", "--max-num-seqs", "4", "--limit-mm-per-prompt", '{"image":1}',
+        "--no-enable-prefix-caching", "--mm-processor-cache-gb", "0",
+        "--mm-processor-kwargs", '{"max_pixels": 4000000}']
+params = { max_tokens = 24000, max_pixels = 3900000, server_max_pixels = 4000000, temperature = 0.1, extra = { top_p = 0.9 } }
+
+[models.dots_ocr]
+adapter = "dots"
+image = "vllm/vllm-openai:v0.30.0"
+model = "dots"
+args = ["dots-studio/dots.ocr", "--served-model-name", "dots", "--trust-remote-code",
+        "--chat-template-content-format", "string", "--gpu-memory-utilization", "0.85",
+        "--max-model-len", "32768", "--max-num-seqs", "4", "--limit-mm-per-prompt", '{"image":1}',
+        "--no-enable-prefix-caching", "--mm-processor-cache-gb", "0",
+        "--mm-processor-kwargs", '{"max_pixels": 4000000}']
+params = { max_tokens = 24000, max_pixels = 3900000, server_max_pixels = 4000000, temperature = 0.1, extra = { top_p = 0.9 } }
+
+[models.chandra2]
+adapter = "chandra"
+image = "vllm/vllm-openai:v0.30.0"
+model = "chandra"
+args = ["dangvansam/chandra-ocr-2-FP8-dynamic", "--served-model-name", "chandra", "--dtype", "bfloat16",
+        "--max-model-len", "18000", "--max-num-seqs", "4", "--max-num-batched-tokens", "8192",
+        "--gpu-memory-utilization", "0.85", "--mm-processor-kwargs", '{"min_pixels": 3136, "max_pixels": 6291456}',
+        "--no-enable-prefix-caching"]
+params = { max_tokens = 11000 }
+
+[models.chandra2_awq]
+adapter = "chandra"
+image = "vllm/vllm-openai:v0.30.0"
+model = "chandra"
+args = ["Sohailhosseini/chandra-ocr-2-AWQ-W4A16", "--served-model-name", "chandra",
+        "--max-model-len", "18000", "--max-num-seqs", "4", "--max-num-batched-tokens", "8192",
+        "--gpu-memory-utilization", "0.85", "--mm-processor-kwargs", '{"min_pixels": 3136, "max_pixels": 6291456}',
+        "--no-enable-prefix-caching"]
+params = { max_tokens = 11000 }
+
+[models.deepseek2]
+adapter = "deepseek"
+image = "vllm/vllm-openai:v0.30.0"
+model = "deepseek"
+args = ["deepseek-ai/DeepSeek-OCR-2", "--served-model-name", "deepseek", "--trust-remote-code",
+        "--logits_processors", "vllm.model_executor.models.deepseek_ocr:NGramPerReqLogitsProcessor",
+        "--no-enable-prefix-caching", "--mm-processor-cache-gb", "0",
+        "--max-model-len", "8192", "--gpu-memory-utilization", "0.85", "--max-num-seqs", "8"]
+params = { max_tokens = 7000 }
+
+[models.hunyuan]
+adapter = "hunyuan"
+image = "vllm/vllm-openai:v0.30.0"
+model = "hunyuan"
+args = ["tencent/HunyuanOCR", "--served-model-name", "hunyuan", "--trust-remote-code",
+        "--limit-mm-per-prompt", '{"image":1,"video":0}', "--max-model-len", "32768",
+        "--max-num-batched-tokens", "32768", "--max-num-seqs", "4", "--gpu-memory-utilization", "0.85",
+        "--no-enable-prefix-caching", "--mm-processor-cache-gb", "0", "--enforce-eager"]
+params = { max_tokens = 16000, max_side = 2560 }
+
+[models.qwen9b_page]
+adapter = "qwen_page"
+image = "ghcr.io/ggml-org/llama.cpp:server-cuda"
+model = "qwen"
+args = ["-m", "/root/.cache/huggingface/gguf/Qwen3.5-9B-Q5_K_M.gguf", "--mmproj", "/root/.cache/huggingface/gguf/mmproj-F16.gguf", "--alias", "qwen", "--host", "0.0.0.0", "--port", "8000",
+        "-ngl", "999", "-c", "16384", "-np", "1", "-fa", "on", "--jinja", "--reasoning", "off",
+        "--image-max-tokens", "4096"]
+env = { LLAMA_CACHE = "/root/.cache/huggingface/llama.cpp" }
+params = { max_tokens = 10000 }
+
+[models.qwen9b_arbiter]
+adapter = "qwen_arbiter"
+image = "ghcr.io/ggml-org/llama.cpp:server-cuda"
+model = "qwen"
+args = ["-m", "/root/.cache/huggingface/gguf/Qwen3.5-9B-Q5_K_M.gguf", "--mmproj", "/root/.cache/huggingface/gguf/mmproj-F16.gguf", "--alias", "qwen", "--host", "0.0.0.0", "--port", "8000",
+        "-ngl", "999", "-c", "16384", "-np", "1", "-fa", "on", "--jinja", "--reasoning", "off",
+        "--image-max-tokens", "4096"]
+env = { LLAMA_CACHE = "/root/.cache/huggingface/llama.cpp" }
+params = { max_tokens = 8192 }
+
+[models.paddle_vl]
+adapter = "paddle_vl"
+image = "vllm/vllm-openai:v0.30.0"
+model = "PaddlePaddle/PaddleOCR-VL-1.6"
+args = ["PaddlePaddle/PaddleOCR-VL-1.6", "--served-model-name", "PaddlePaddle/PaddleOCR-VL-1.6",
+        "--trust-remote-code", "--max-model-len", "16384", "--max-num-batched-tokens", "16384",
+        "--gpu-memory-utilization", "0.5", "--no-enable-prefix-caching", "--mm-processor-cache-gb", "0"]
+
+[models.qwen38_ud_arbiter]
+# Arbiter comparison: Qwen3.8-27B UD Q4_K_M in Ollama on a remote server (Tailscale). No API key needed.
+adapter = "qwen_arbiter"
+base_url = "http://ollama-host:11434/v1"
+model = "qwen3.8-ud:27b"
+params = { max_tokens = 8192, extra = { reasoning_effort = "none" } }

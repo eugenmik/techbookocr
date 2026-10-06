@@ -1,0 +1,12 @@
+test_books/
+out/
+work/
+.venv/
+__pycache__/
+*.pyc
+.superpowers/
+eval/candidates/
+eval/runs/
+eval/golden/review.html
+eval/logs/
+eval/cascade/
