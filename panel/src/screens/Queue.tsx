@@ -57,16 +57,19 @@ export function QueueScreen(props: { state: AppState; theme: Theme }) {
             <For each={rows()}>
               {({ b, i }) => {
                 const sel = i === s().cursor
+                // selection: explicit background and text color; without color (NO_COLOR) only ❯ and a bold name
+                const bg = sel ? t.selBg : undefined
+                const hi = (fg: string | undefined) => (sel && t.selFg ? t.selFg : fg)
                 const p = bookRowText(b, L().nameW, sel, s().marks.includes(b.name))
                 return (
                   <text>
-                    <Span inverse={sel} fg={t.accent}>{p.ptr + " "}</Span>
-                    {sel ? <strong><Span inverse>{p.name}</Span></strong> : <span>{p.name}</span>}
-                    <Span inverse={sel}>{"  "}</Span>
-                    <Span inverse={sel} fg={statusColor(t, b.status)}>{p.state}</Span>
-                    <Span inverse={sel}>{"  "}</Span>
-                    <Span inverse={sel} fg={b.status === "failed" ? t.err : b.status === "processing" ? t.accent : t.muted}>{p.detail}</Span>
-                    <Span inverse={sel} fg={t.muted}>{p.prio}</Span>
+                    <Span fg={hi(t.accent)} bg={bg}>{p.ptr + " "}</Span>
+                    {sel ? <strong><Span fg={hi(undefined)} bg={bg}>{p.name}</Span></strong> : <span>{p.name}</span>}
+                    <Span bg={bg}>{"  "}</Span>
+                    <Span fg={hi(statusColor(t, b.status))} bg={bg}>{p.state}</Span>
+                    <Span bg={bg}>{"  "}</Span>
+                    <Span fg={hi(b.status === "failed" ? t.err : b.status === "processing" ? t.accent : t.muted)} bg={bg}>{p.detail}</Span>
+                    <Span fg={hi(t.muted)} bg={bg}>{p.prio}</Span>
                   </text>
                 )
               }}

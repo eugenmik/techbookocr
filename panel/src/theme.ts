@@ -7,12 +7,15 @@ export interface Theme {
   ok?: string
   warn?: string
   err?: string
+  selFg?: string   // selected row: explicit text and background colors (reverse video hides text on a transparent background)
+  selBg?: string
 }
 
 export function makeTheme(env: Record<string, string | undefined> = process.env): Theme {
   const color = !env.NO_COLOR && env.TERM !== "dumb"
   if (!color) return { color }
-  return { color, muted: "#8a8a8a", accent: "#5fafd7", ok: "#87af5f", warn: "#d7af5f", err: "#d75f5f" }
+  return { color, muted: "#8a8a8a", accent: "#5fafd7", ok: "#87af5f", warn: "#d7af5f", err: "#d75f5f",
+           selFg: "#f5f5f5", selBg: "#2e5a78" }
 }
 
 export const STATUS_ICON: Record<string, string> = {

@@ -7,7 +7,7 @@ import { Shell } from "../src/components/Shell"
 import { SettingsScreen } from "../src/screens/Settings"
 import { QueueScreen, bookRowText, windowTop } from "../src/screens/Queue"
 import { createSignal } from "solid-js"
-import { TextAttributes } from "@opentui/core"
+import { RGBA, TextAttributes } from "@opentui/core"
 import { initialState, update, type AppState } from "../src/state/store"
 import { makeTheme } from "../src/theme"
 import { strWidth } from "../src/format"
@@ -108,15 +108,33 @@ test("multi-line error and event message stay on one row", async () => {
   expect(strWidth(bookRowText(books[0], 30, false, false).detail)).toBe(18)
 })
 
-test("selected row is reversed, others not", async () => {
-  setup = await testRender(() => <QueueScreen state={stateWith(LIBRARY, 120, 30)} theme={makeTheme({})} />, { width: 118, height: 23 })
+const near = (c: { r: number; g: number; b: number; a: number }, hex: string) => {
+  const e = RGBA.fromHex(hex)
+  return Math.abs(c.r - e.r) < 0.01 && Math.abs(c.g - e.g) < 0.01 && Math.abs(c.b - e.b) < 0.01 && c.a > 0.99
+}
+
+test("selected row is highlighted with an opaque background and readable text", async () => {
+  const theme = makeTheme({})
+  setup = await testRender(() => <QueueScreen state={stateWith(LIBRARY, 120, 30)} theme={theme} />, { width: 118, height: 23 })
   await setup.renderOnce()
   const lines = setup.captureSpans().lines
   const rowOf = (name: string) => lines.find((l) => l.spans.map((x) => x.text).join("").includes(name))!
   const sel = rowOf("▸ arbiter").spans.filter((x) => /Гиршович|arbiter|73%/.test(x.text))
   expect(sel.length).toBeGreaterThan(0)
-  expect(sel.every((x) => x.attributes & TextAttributes.INVERSE)).toBe(true)
-  expect(rowOf("Сафронов").spans.some((x) => x.attributes & TextAttributes.INVERSE)).toBe(false)
+  // reverse video on a transparent background hid the text: colors are explicit, no INVERSE
+  expect(sel.every((x) => !(x.attributes & TextAttributes.INVERSE))).toBe(true)
+  expect(sel.every((x) => near(x.bg, theme.selBg!) && near(x.fg, theme.selFg!))).toBe(true)
+  expect(rowOf("Сафронов").spans.some((x) => near(x.bg, theme.selBg!))).toBe(false)
+})
+
+test("NO_COLOR: selected row is marked by the pointer and bold, never reversed", async () => {
+  setup = await testRender(() => <QueueScreen state={stateWith(LIBRARY, 120, 30)} theme={makeTheme({ NO_COLOR: "1" })} />,
+                           { width: 118, height: 23 })
+  await setup.renderOnce()
+  const row = setup.captureSpans().lines.find((l) => l.spans.map((x) => x.text).join("").includes("▸ arbiter"))!
+  expect(row.spans.map((x) => x.text).join("")).toContain("❯")
+  expect(row.spans.some((x) => x.attributes & TextAttributes.INVERSE)).toBe(false)
+  expect(row.spans.find((x) => x.text.includes("Гиршович"))!.attributes & TextAttributes.BOLD).toBeTruthy()
 })
 
 test("windowTop: moves only when cursor leaves window", () => {
