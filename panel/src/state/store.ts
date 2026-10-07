@@ -9,8 +9,9 @@ import { selectedName, visibleBooks } from "./select"
 
 export type Screen = "queue" | "book" | "telemetry" | "settings" | "fixes"
 export type FixFilter = "all" | "review" | "applied" | "reverted" | "not_found"
+export type MathMode = "readable" | "raw"
 export interface FixesView { book: string; data: FixesData | null; cursorId: string | null; filter: FixFilter; back: Screen
-  error?: string | null }
+  error?: string | null; math?: MathMode }       // math: unset means "readable"
 export interface DirEntry { name: string; dir: boolean }
 export type ActName = "skip" | "retry" | "bump" | "run" | "daemon_start" | "daemon_toggle" | "daemon_stop"
 export type Command =

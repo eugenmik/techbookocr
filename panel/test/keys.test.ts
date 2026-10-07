@@ -339,6 +339,16 @@ describe("fixes", () => {
     expect(r.s.fixes!.filter).toBe("review")
     expect(r.s.fixes!.cursorId).toBe("0046-1")
   })
+  test("m toggles readable / raw math; default is readable", () => {
+    const s = opened()
+    expect(s.fixes!.math).toBe("readable")
+    const raw = press(s, k("m"))
+    expect(raw.s.fixes!.math).toBe("raw")
+    expect(raw.cmds).toEqual([])
+    expect(press(raw.s, k("m")).s.fixes!.math).toBe("readable")
+    expect(footerHints(s).left).toContain("m math")
+    expect(press(raw.s, k("/")).s.fixes!.math).toBe("raw")                 // the filter keeps the mode
+  })
   test("read-only: space and enter only notify", () => {
     const s = opened({ ...FDATA, editable: false, why_not: "book is processing" })
     expect(press(s, SPACE).cmds).toEqual([{ kind: "notify", text: "read-only: book is processing", level: "error" }])

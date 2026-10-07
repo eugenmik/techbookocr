@@ -1,7 +1,7 @@
 import { For, Show } from "solid-js"
 import { Section } from "../components/Section"
 import { Span } from "../components/Span"
-import { clipContextLine, contextParts, fixColumns, fixCountsLine, fixIcon, fixLegend } from "../fixes-view"
+import { clipContextLine, contextParts, fixColumns, fixCountsLine, fixIcon, fixLegend, fixTexts } from "../fixes-view"
 import { oneLine, padEnd, strWidth, truncate } from "../format"
 import { CHROME_H } from "../layout"
 import { cursorIndex, visibleFixes } from "../state/fixes"
@@ -38,7 +38,7 @@ export function FixesScreen(props: { state: AppState; theme: Theme }) {
           <text fg={t.muted}>{pad() + "Esc back"}</text>
         </Show>
       }>
-        <text fg={t.muted}>{pad() + fixCountsLine(v().data!.fixes.length, v().data!.counts, FILTER_LABEL[v().filter], width() - strWidth(pad()))}</text>
+        <text fg={t.muted}>{pad() + fixCountsLine(v().data!.fixes.length, v().data!.counts, FILTER_LABEL[v().filter], width() - strWidth(pad()), v().math ?? "readable")}</text>
         <Show when={!v().data!.editable}><text fg={t.warn}>{truncate(`read-only: ${oneLine(v().data!.why_not ?? "")}`, width())}</text></Show>
         <Section title="Fixes" width={width()} theme={t} />
         <Show when={vis().length} fallback={<text fg={t.muted}>no fixes in this filter</text>}>
@@ -47,13 +47,14 @@ export function FixesScreen(props: { state: AppState; theme: Theme }) {
               const sel = () => f.id === v().cursorId
               const icon = fixIcon(f)
               const ref = f.page ? `${f.scan} p.${f.page}` : f.scan
+              const tx = fixTexts(f, v().math)
               const reason = f.state === "not_found" ? `${f.reason ?? ""} · not found`.replace(/^ · /, "") : (f.reason ?? "")
               return (
                 <text>
                   <Span fg={sel() ? t.accent : undefined}>{sel() ? "❯ " : "  "}</Span>
                   <Span fg={color(icon)}>{icon + " "}</Span>
-                  <span>{padEnd(ref, cols().ref) + " " + padEnd(oneLine(f.was), cols().was) + " " +
-                         padEnd(oneLine(f.now) || "(empty)", cols().now)}</span>
+                  <span>{padEnd(ref, cols().ref) + " " + padEnd(oneLine(tx.was), cols().was) + " " +
+                         padEnd(oneLine(tx.now) || "(empty)", cols().now)}</span>
                   <Show when={cols().reason}><Span fg={t.muted}>{" " + truncate(reason, cols().reason)}</Span></Show>
                 </text>
               )
@@ -64,7 +65,7 @@ export function FixesScreen(props: { state: AppState; theme: Theme }) {
         <Show when={cur()}>
           {(() => {
             const f = cur()!
-            const p = contextParts(f)
+            const p = contextParts(f, v().math)
             const title = `Context · ${f.page ? `p. ${f.page}` : f.scan}${f.kind ? ` · ${f.kind}` : ""}` +
               (cols().reason ? "" : f.reason ? ` · ${f.reason}` : "")
             // The line with the fix plus its neighbours: one line above and below, CONTEXT_LINES at most.

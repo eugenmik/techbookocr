@@ -1,6 +1,7 @@
 // Fix display: state icon, simplified context markup, column widths, summary.
 import type { Fix, FixSummary } from "./bridge/types"
 import { strWidth, truncate } from "./format"
+import { readableMath } from "./math-text"
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 
@@ -42,10 +43,11 @@ export function fixLegend(width: number): string {
 
 /** The counters and filter line: the full form if it fits, otherwise with icons. */
 export function fixCountsLine(total: number, c: { applied: number; reverted: number; suggested: number; not_found: number },
-                              filter: string, width: number): string {
+                              filter: string, width: number, math?: "readable" | "raw"): string {
+  const m = math ? `math: ${math}` : ""
   const full = `Fixes ${total} · applied ${c.applied} · printed ${c.reverted} · to review ${c.suggested}` +
-    ` · not found ${c.not_found}   filter: ${filter}`
-  const compact = `Fixes ${total} · ✓${c.applied} ↶${c.reverted} ?${c.suggested} ·${c.not_found} · ${filter}`
+    ` · not found ${c.not_found}   filter: ${filter}` + (m && `   ${m}`)
+  const compact = `Fixes ${total} · ✓${c.applied} ↶${c.reverted} ?${c.suggested} ·${c.not_found} · ${filter}` + (m && ` · ${m}`)
   return truncate(strWidth(full) <= width ? full : compact, width)
 }
 
@@ -78,7 +80,18 @@ export function simplifyMarkup(s: string): string {
     .replace(/<(?!\/?(?:sub|sup)>)[^>]*>/g, "")
 }
 
-export function contextParts(f: Fix) {
+/** Whether to show the fix in readable form: "readable" mode and the readable "was" differs from the readable "now" (otherwise the fix shows only in the markup). */
+export function mathReadable(f: Fix, math: "readable" | "raw" | undefined): boolean {
+  if (math === "raw") return false
+  return f.was === f.now || readableMath(f.was) !== readableMath(f.now)
+}
+
+/** "was"/"now" as shown in the list columns. */
+export function fixTexts(f: Fix, math: "readable" | "raw" | undefined) {
+  return mathReadable(f, math) ? { was: readableMath(f.was), now: readableMath(f.now) } : { was: f.was, now: f.now }
+}
+
+export function contextParts(f: Fix, math?: "readable" | "raw") {
   let before = f.before
   const lt = before.indexOf("<"), gt = before.indexOf(">")
   if (gt !== -1 && (lt === -1 || gt < lt)) before = before.slice(gt + 1)      // the context started in the middle of a tag
@@ -86,8 +99,9 @@ export function contextParts(f: Fix) {
   const alt = after.lastIndexOf("<"), agt = after.lastIndexOf(">")
   if (alt > agt) after = after.slice(0, alt)                                  // and ended in the middle of a tag
   const applied = f.state === "applied"
-  return { before: simplifyMarkup(before), cur: applied ? f.now : f.was, after: simplifyMarkup(after),
-           other: applied ? f.was : f.now, otherLabel: (applied ? "was" : "now") as "was" | "now" }
+  const t = mathReadable(f, math) ? readableMath : (x: string) => x
+  return { before: t(simplifyMarkup(before)), cur: t(applied ? f.now : f.was), after: t(simplifyMarkup(after)),
+           other: t(applied ? f.was : f.now), otherLabel: (applied ? "was" : "now") as "was" | "now" }
 }
 
 export function fixColumns(width: number) {

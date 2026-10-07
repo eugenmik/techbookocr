@@ -481,7 +481,8 @@ const FIXDATA = { fixes: [
 
 function fixesState(w: number, h: number, data: any = FIXDATA) {
   const s = stateWith(LIBRARY, w, h)
-  return { ...s, screen: "fixes" as const, fixes: { book: s.bookName!, data, cursorId: "0046-1", filter: "all" as const, back: "book" as const } }
+  return { ...s, screen: "fixes" as const, fixes: { book: s.bookName!, data, cursorId: "0046-1", filter: "all" as const, back: "book" as const,
+    math: "readable" as "readable" | "raw" } }
 }
 
 test("fixes screen at 120×30: list, reason column, context with brackets", async () => {
@@ -601,4 +602,53 @@ test("book header with the fix summary does not wrap at 80 columns", async () =>
   const rows = f.split("\n")
   expect(rows[1]).toContain("Fixes 25")
   expect(rows[2].trim()).toStartWith("Stages")
+})
+
+// ---- readable formulas on the Fixes screen ----
+const MATHDATA = { fixes: [
+  { id: "m1", scan: "0010", page: "5", block: 1, kind: null, was: "σ<sub>-1p</sub> = 2", now: "σ<sub>-1p</sub> = 3",
+    state: "applied", suggested: false, reason: null, decided_by: "model", before: "Limit ", after: " MPa" },
+  { id: "m2", scan: "0011", page: "6", block: 1, kind: null, was: "x<sup>2</sup>", now: "x²",
+    state: "applied", suggested: false, reason: null, decided_by: "model", before: "before ", after: " after" }],
+  counts: { applied: 2, reverted: 0, suggested: 0, not_found: 0 }, editable: true, why_not: null } as any
+
+test("fixes screen shows formula markup readable: list and context", async () => {
+  const st = fixesState(120, 30, MATHDATA)
+  st.fixes = { ...st.fixes, cursorId: "m1" }
+  const f = await frame(() => <FixesScreen state={st} theme={makeTheme({})} />, 118, 23)
+  expect(f).toContain("σ₋₁ₚ = 2")
+  expect(f).toContain("Limit ⟦σ₋₁ₚ = 3⟧ MPa")
+  expect(f).toContain("was: σ₋₁ₚ = 2")
+  expect(f).not.toContain("<sub>")
+  expect(f).toContain("math: readable")
+})
+
+test("fixes screen: row whose readable forms coincide is shown raw", async () => {
+  const st = fixesState(120, 30, MATHDATA)
+  st.fixes = { ...st.fixes, cursorId: "m2" }
+  const f = await frame(() => <FixesScreen state={st} theme={makeTheme({})} />, 118, 23)
+  expect(f).toContain("x<sup>2</sup>")
+  expect(f).toContain("⟦x²⟧")
+  expect(f).toContain("σ₋₁ₚ = 2")                                       // the neighbouring line stays readable
+})
+
+test("fixes screen with math: raw shows markup everywhere", async () => {
+  const st = fixesState(120, 30, MATHDATA)
+  st.fixes = { ...st.fixes, cursorId: "m1", math: "raw" }
+  const f = await frame(() => <FixesScreen state={st} theme={makeTheme({})} />, 118, 23)
+  expect(f).toContain("σ<sub>-1p</sub> = 2")
+  expect(f).toContain("Limit ⟦σ<sub>-1p</sub> = 3⟧ MPa")
+  expect(f).not.toContain("σ₋₁ₚ")
+  expect(f).toContain("math: raw")
+})
+
+test("fixes header with math fits 80 columns", async () => {
+  const st = fixesState(80, 24, MATHDATA)
+  for (const filter of ["all", "to review", "not found"] as const) {
+    st.fixes = { ...st.fixes, cursorId: "m1", filter: (filter === "all" ? "all" : filter === "to review" ? "review" : "not_found") as any }
+    const f = await frame(() => <FixesScreen state={st} theme={makeTheme({})} />, 78, 17)
+    const row = f.split("\n")[1]
+    expect(strWidth(row.trimEnd())).toBeLessThanOrEqual(78)
+    expect(row).toContain("math: readable")
+  }
 })

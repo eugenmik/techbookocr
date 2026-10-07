@@ -54,7 +54,7 @@ export function goScreen(s: AppState, screen: Screen): Result {
 function openFixes(s: AppState): Result {
   if (!s.bookName) return ok(s)
   const back = s.screen === "fixes" ? (s.fixes?.back ?? "book") : s.screen
-  return ok({ ...s, screen: "fixes", modal: null, fixes: { book: s.bookName, data: null, cursorId: null, filter: "all", back } },
+  return ok({ ...s, screen: "fixes", modal: null, fixes: { book: s.bookName, data: null, cursorId: null, filter: "all", back, math: "readable" } },
             { kind: "loadFixes", book: s.bookName })
 }
 
@@ -270,6 +270,8 @@ export const BINDINGS: Binding[] = [
     run: (s) => { if (!s.fixes) return ok(s)
                   const filter = FILTERS[(FILTERS.indexOf(s.fixes.filter) + 1) % FILTERS.length]
                   return ok({ ...s, fixes: settleCursor({ ...s.fixes, filter }) }) } },
+  { scope: "fixes", keys: ["m"], label: "toggle readable / raw math", hint: "m math",
+    run: (s) => s.fixes ? ok({ ...s, fixes: { ...s.fixes, math: (s.fixes.math ?? "readable") === "raw" ? "readable" : "raw" } }) : ok(s) },
   { scope: "fixes", keys: ["escape"], label: "back", hint: "esc back", run: (s) => goScreen(s, s.fixes?.back ?? "book") },
   // Telemetry
   { scope: "telemetry", keys: ["pageup"], label: "scroll log up", hint: "PgUp/PgDn log",

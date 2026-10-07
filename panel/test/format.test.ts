@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { oneLine } from "../src/format"
-import { contextParts, fixColumns, fixIcon, fixSummaryLine, simplifyMarkup } from "../src/fixes-view"
+import { contextParts, fixColumns, fixCountsLine, fixIcon, fixSummaryLine, simplifyMarkup } from "../src/fixes-view"
 import { bar, fmtDuration, fmtGB, fmtInt, padEnd, padStart, sparkline, strWidth, truncate } from "../src/format"
 
 describe("width-aware text", () => {
@@ -69,4 +69,15 @@ test("fix view helpers", () => {
   // no "?" at all: nothing to look at (not "reviewed": nobody has opened the new book yet)
   expect(fixSummaryLine({ total: 4, suggested: 0, reviewed: true })).toBe("Fixes 4 · nothing to review · f")
   expect(fixSummaryLine(null)).toBeNull()                          // the summary could not be read
+})
+
+describe("fixes math view", () => {
+  const C = { applied: 1, reverted: 2, suggested: 3, not_found: 4 }
+  test("fixCountsLine shows the math mode and stays within width", () => {
+    expect(fixCountsLine(10, C, "all", 120, "readable")).toContain("math: readable")
+    expect(fixCountsLine(10, C, "all", 120, "raw")).toContain("math: raw")
+    expect(fixCountsLine(10, C, "all", 120)).not.toContain("math")
+    for (const w of [40, 55, 69, 90]) expect(strWidth(fixCountsLine(10, C, "to review", w, "readable"))).toBeLessThanOrEqual(w)
+    expect(fixCountsLine(10, C, "to review", 69, "readable")).toContain("math: readable")
+  })
 })
