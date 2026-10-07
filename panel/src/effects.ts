@@ -1,7 +1,7 @@
 // Executes reducer commands: bridge requests, file system, xdg-open, $EDITOR.
 // Any error → toast, not an exception.
-import { readdirSync, statSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readdirSync, statSync } from "node:fs"
+import { basename, join } from "node:path"
 import type { BridgeLike } from "./bridge/client"
 import type { ActResult, AddResult, BookDetail, Fix, FixCounts, FixesData, SettingsData, Snapshot } from "./bridge/types"
 import { splitWords } from "./shell"
@@ -78,6 +78,11 @@ export async function runCommand(cmd: Command, ctx: EffectCtx): Promise<Action[]
       case "openFolder":
         Bun.spawn(["xdg-open", cmd.path], { stdout: "ignore", stderr: "ignore" })
         return [toast(`opened ${cmd.path}`)]
+      case "openFile":
+        // fixes/ may not have been copied or may be deleted: xdg-open would stay silent, so say it here
+        if (!existsSync(cmd.path)) return [toast(`scan fragment missing: ${cmd.path}`, "error")]
+        Bun.spawn(["xdg-open", cmd.path], { stdout: "ignore", stderr: "ignore" })
+        return [toast(`opened ${basename(cmd.path)}`)]
       case "listDir":
         return [{ type: "dirListed", dir: cmd.dir, entries: listDir(cmd.dir), focus: cmd.focus }]
       case "log":

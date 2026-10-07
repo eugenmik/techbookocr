@@ -493,6 +493,27 @@ def test_assemble_writes_fix_journal_and_arbiter_gets_denied_pairs(tmp_path):
     assert "15—25" in (out / "book.md").read_text(encoding="utf-8")
 
 
+def test_assemble_saves_scan_crop_of_fixed_block(tmp_path):
+    """Assembly crops a block with a fix from the scan: out/<book>/fixes/<scan>-b<ord>.webp, the path is in the
+    journal's crop field."""
+    from PIL import Image
+
+    from tests.pipeline.fakes import TABLE_B, TEXT
+
+    fix = '\nFIXES: [{"was": "15—25", "now": "15—35"}]'
+    arbiter = FakeVLM(lambda p: BlockResult(TABLE_B.replace("15—25", "15—35") + fix if "one table block" in p
+                                            else TEXT + "\nFIXES: []", seconds=1.0))
+    cfg = Config(models=MODELS, pipeline=PipelineConfig(fix_reject_dictionary_words=False, crop_pad=12))
+    page_png(tmp_path / "out" / "work" / "pages" / "0001.png")
+    out = run_pages([PageEntry(name="0001", idx=0, scan=0, side="", file="pages/0001.png", width=1000, height=1400)],
+                    tmp_path / "out", cfg, RunOptions(mode="cascade"), book_name="Книга", source="book.djvu",
+                    **fake_deps(Servers(), fake_adapters(arbiter=arbiter)))
+    f = json.loads((out / "fixes.json").read_text(encoding="utf-8"))["fixes"][0]
+    assert f["crop"] == f"fixes/0001-b{f['block']}.webp"
+    with Image.open(out / f["crop"]) as im:
+        assert im.size == (824, 204)                                  # table (100, 220, 900, 400) + 12 px
+
+
 def test_fix_journal_failure_is_logged_and_stale_journal_removed(tmp_path, monkeypatch):
     """A failure to build the journal does not break assembly, it is logged and the old fixes.json is removed."""
     def boom(*a, **kw):
@@ -501,6 +522,8 @@ def test_fix_journal_failure_is_logged_and_stale_journal_removed(tmp_path, monke
     monkeypatch.setattr("techbookocr.fixes.review.journal_from_blocks", boom)
     (tmp_path / "out").mkdir()
     (tmp_path / "out" / "fixes.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "out" / "fixes").mkdir()
+    (tmp_path / "out" / "fixes" / "0001-b1.webp").write_bytes(b"old")
     lines: list[str] = []
     page_png(tmp_path / "out" / "work" / "pages" / "0001.png")
     deps = {**fake_deps(Servers(), fake_adapters()), "echo": lines.append}
@@ -508,4 +531,5 @@ def test_fix_journal_failure_is_logged_and_stale_journal_removed(tmp_path, monke
                     tmp_path / "out", CFG, RunOptions(mode="cascade"), book_name="Книга", source="book.djvu", **deps)
     assert (out / "book.md").exists()
     assert not (out / "fixes.json").exists()
+    assert not (out / "fixes").exists()                                   # nor the crops of the previous assembly
     assert any("fix journal: RuntimeError: boom" in ln for ln in lines)

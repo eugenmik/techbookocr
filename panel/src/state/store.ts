@@ -23,6 +23,7 @@ export type Command =
   | { kind: "saveSettings"; updates: { section: string; key: string; value: FieldValue }[] }
   | { kind: "editToml"; path: string }
   | { kind: "openFolder"; path: string }
+  | { kind: "openFile"; path: string }
   | { kind: "listDir"; dir: string; focus?: string }
   | { kind: "log"; lines: number }
   | { kind: "loadFixes"; book: string }

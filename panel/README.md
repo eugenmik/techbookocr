@@ -49,7 +49,7 @@ Hotkeys also work on the Russian JCUKEN layout (the same physical keys). `Ctrl+C
 | Queue | `Up/Down` or `j/k` move, `Space` mark, `c` clear marks, `Enter` open Book, `a` add books, `x` run, `s` skip, `r` retry, `+`/`-` priority, `/` filter, `f` review misprint fixes |
 | Daemon (Queue, Book, Telemetry) | `d` start, `p` pause/resume, `t` stop (asks for confirmation) |
 | Book | `Tab` switch pane, `o` open folder, `r`/`s` retry/skip, `f` review misprint fixes, `Esc` back |
-| Fixes | `Up/Down` or `j/k` move, `PgUp/PgDn` page, `Space` toggle fix ⇄ printed text, `Enter` keep (clear ?), `n` next to review, `/` filter, `m` readable / raw math, `Esc` back |
+| Fixes | `Up/Down` or `j/k` move, `PgUp/PgDn` page, `Space` toggle fix ⇄ printed text, `Enter` keep (clear ?), `n` next to review, `/` filter, `m` readable / raw math, `v` open the scan fragment, `Esc` back |
 | Settings | `Up/Down` field, `Left/Right` value, `Enter` edit number/path, `Ctrl+S` save, `e` open in `$EDITOR`, `Esc` discard |
 | Add books | `Up/Down` move, `Space` mark a file or a folder (a folder is added recursively), `Enter` open folder / add marked (or the current file), `a` add the marked files and folders (or the entry under the cursor, whatever it is), `Backspace` parent folder (cursor lands on the folder you came from), `Esc` cancel |
 | Help | `Up/Down` scroll, `Esc`/`?`/`q` close |

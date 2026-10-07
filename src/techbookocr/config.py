@@ -64,6 +64,7 @@ class PipelineConfig:
     textlayer_table_conf: float = 0.7      # confidence threshold of table geometry from the layer; below it goes to the arbiter
     textlayer_probe_pages: int = 40        # born-digital probe pages for text_layer=auto
     webp_quality: int = 70                 # lossy WebP quality for the book's images/ (1-100)
+    fix_page_crop_max: int = 1600          # long side of a whole-page scan crop for the v key, px
     transport_retries: int = 2             # request retries on a transport failure
     max_consecutive_failures: int = 3      # consecutive failures after which the stage is aborted
     lang_sample_pages: int = 10            # pages used for language detection

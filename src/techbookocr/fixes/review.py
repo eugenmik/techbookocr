@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -190,23 +191,70 @@ def peek_journal(book_dir: Path) -> Journal:
     return journal if journal is not None else _from_quality(book_dir)
 
 
-def journal_from_blocks(book_dir: Path, blocks, pages) -> Journal:
+CROPS = "fixes"            # folder of scan crops in out/<book>/
+
+
+def _clear_crops(book_dir: Path) -> None:
+    """Remove the crops of a previous assembly (--redo): old files must not point at other blocks."""
+    d = book_dir / CROPS
+    if d.is_symlink() or d.is_file():
+        d.unlink()
+    elif d.exists():
+        shutil.rmtree(d)
+
+
+def _save_crop(book_dir: Path, b, images, cfg) -> str:
+    """Crop of the block from the scan at its original resolution (box + crop_pad, no upscaling); a whole-page
+    block or a block without a box gives the whole page, shrunk to [pipeline] fix_page_crop_max. The path is
+    relative to the book folder."""
+    from PIL import Image
+
+    from techbookocr.pipeline.crops import pad_box, save_image
+
+    page = images.get(b.page)
+    bbox = getattr(b, "bbox", None)
+    if b.kind == "page" or bbox is None:
+        img = page.copy()
+        img.thumbnail((cfg.fix_page_crop_max, cfg.fix_page_crop_max), Image.Resampling.LANCZOS)
+    else:
+        img = page.crop(pad_box(tuple(bbox), page.size, cfg.crop_pad))
+    rel = f"{CROPS}/{b.page}-b{b.ord}.webp"
+    save_image(img, book_dir / rel, quality=cfg.webp_quality)
+    return rel
+
+
+def journal_from_blocks(book_dir: Path, blocks, pages, *, images=None, cfg=None,
+                        log=lambda m: None) -> Journal:
     """Journal of a new book from state (b.fixes with or without the rejected field), built at assembly while
     work/ is still there. Each record's state follows what actually stands in the assembled book.md. A place
     that cannot be found unambiguously (several token occurrences without context) and a fix with an empty
-    "was" or "now" give not_found; the other variant is looked up only if the expected one is absent."""
+    "was" or "now" give not_found; the other variant is looked up only if the expected one is absent.
+    images (PageImages): every block with fixes gets a scan crop in fixes/ (the crop field of its records);
+    without images there are no crops. A failed crop goes to log, the block's fixes stay without crop and the
+    assembly goes on."""
+    if cfg is None:
+        from techbookocr.config import PipelineConfig
+        cfg = PipelineConfig()
+    _clear_crops(book_dir)
     printed = {p.name: p.printed for p in pages}
     md = (book_dir / "book.md").read_text(encoding="utf-8")
     per_scan: dict[str, int] = {}
     out: list[Fix] = []
     for b in blocks:
+        crop = None
+        if b.fixes and images is not None:
+            try:
+                crop = _save_crop(book_dir, b, images, cfg)
+            except Exception as e:  # noqa: BLE001 — the crop is only for viewing, the journal matters more
+                log(f"fix crop {b.page} block {b.ord}: {type(e).__name__}: {e}")
         for raw in b.fixes or []:
             per_scan[b.page] = per_scan.get(b.page, 0) + 1
             rejected = raw.get("rejected")
             f = Fix(id=f"{b.page}-{per_scan[b.page]}", scan=b.page, page=printed.get(b.page), block=b.ord,
                     kind=b.kind, was=str(raw.get("was", "")), now=str(raw.get("now", "")),
                     state="reverted" if rejected else "applied", reason=rejected,
-                    decided_by=("user" if rejected == "rejected by user" else "rule") if rejected else "model")
+                    decided_by=("user" if rejected == "rejected by user" else "rule") if rejected else "model",
+                    crop=crop)
             if _one_sided(f):                 # an insertion or a deletion cannot be found in the book
                 _lose(f)
                 out.append(f)
@@ -222,6 +270,10 @@ def journal_from_blocks(book_dir: Path, blocks, pages) -> Journal:
             else:
                 _lose(f)
             out.append(f)
+    try:                                 # every crop failed after the folder was created: no empty folder left
+        (book_dir / CROPS).rmdir()
+    except OSError:
+        pass
     journal = Journal(out)
     save_journal(book_dir / JOURNAL, journal)
     return journal

@@ -92,6 +92,16 @@ function fixKeep(s: AppState): Result {
   return f.suggested ? stepReview(s, { kind: "fixKeep", book: s.fixes.book, id: f.id }) : ok(s)
 }
 
+/** Scan crop of the current fix in the system viewer. The book folder comes from the fixes reply, else from the open Book. */
+function fixScan(s: AppState): Result {
+  const f = curFix(s)
+  if (!s.fixes?.data || !f) return ok(s)
+  if (!f.crop) return ok(s, { kind: "notify", text: "no scan fragment (book assembled before this feature)", level: "info" })
+  const dir = s.fixes.data.out_dir ?? (s.book?.info.name === s.fixes.book ? s.book.out_dir : undefined)
+  if (!dir) return ok(s, { kind: "notify", text: "book folder unknown — reopen Fixes", level: "error" })
+  return ok(s, { kind: "openFile", path: `${dir.replace(/\/+$/, "")}/${f.crop}` })
+}
+
 const hasDraft = (s: AppState) => Object.keys(s.settings?.draft ?? {}).length > 0
 
 /** Quit; with unsaved settings, confirmation first. */
@@ -270,6 +280,7 @@ export const BINDINGS: Binding[] = [
     run: (s) => { if (!s.fixes) return ok(s)
                   const filter = FILTERS[(FILTERS.indexOf(s.fixes.filter) + 1) % FILTERS.length]
                   return ok({ ...s, fixes: settleCursor({ ...s.fixes, filter }) }) } },
+  { scope: "fixes", keys: ["v"], label: "open the scan fragment", hint: "v scan", run: fixScan },
   { scope: "fixes", keys: ["m"], label: "toggle readable / raw math", hint: "m math",
     run: (s) => s.fixes ? ok({ ...s, fixes: { ...s.fixes, math: (s.fixes.math ?? "readable") === "raw" ? "readable" : "raw" } }) : ok(s) },
   { scope: "fixes", keys: ["escape"], label: "back", hint: "esc back", run: (s) => goScreen(s, s.fixes?.back ?? "book") },

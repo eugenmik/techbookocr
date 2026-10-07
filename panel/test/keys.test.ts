@@ -381,6 +381,23 @@ describe("fixes", () => {
     expect(r.cmds[0]).toMatchObject({ kind: "fixSet" })
     expect(r.s.fixes!.cursorId).toBe("0075-1")
   })
+  test("v opens the scan fragment of the current fix; without one it only notifies", () => {
+    const withCrop: FixesData = { ...FDATA, out_dir: "/lib/a",
+      fixes: [{ ...fix("0007-1", "reverted"), crop: "fixes/0007-b2.webp" }, fix("0046-1", "applied", true)] }
+    const s = opened(withCrop)
+    expect(press(s, k("v")).cmds).toEqual([{ kind: "openFile", path: "/lib/a/fixes/0007-b2.webp" }])
+    expect(press(s, DOWN, k("v")).cmds).toEqual([
+      { kind: "notify", text: "no scan fragment (book assembled before this feature)", level: "info" }])
+    const ro = opened({ ...withCrop, editable: false, why_not: "book is processing" })
+    expect(press(ro, k("v")).cmds[0]).toMatchObject({ kind: "openFile" })            // viewing works while processing too
+    expect(footerHints(s).left).toContain("v scan")
+  })
+  test("v without out_dir in the reply falls back to the open book's folder", () => {
+    const s = opened({ ...FDATA, fixes: [{ ...fix("0007-1", "reverted"), crop: "fixes/0007-b2.webp" }] })
+    const withBook = { ...s, book: { ...(s.book ?? {}), info: { name: s.fixes!.book }, out_dir: "/out/b" } as never }
+    expect(press(withBook, k("v")).cmds).toEqual([{ kind: "openFile", path: "/out/b/fixes/0007-b2.webp" }])
+    expect(press(s, k("v")).cmds[0]).toMatchObject({ kind: "notify", level: "error" })
+  })
   test("the only ? fix: the cursor stays; read-only does not move it", () => {
     const s = press(opened(), k("n")).s
     expect(press(s, SPACE).s.fixes!.cursorId).toBe("0046-1")

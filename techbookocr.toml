@@ -35,6 +35,7 @@ sketches_device = "gpu"   # sketches on GPU: the stage runs while the OCR models
 text_layer = "auto"       # born-digital PDF text layer: auto | force | off
 textlayer_table_conf = 0.7   # confidence of table geometry from the layer; below it the table goes to the arbiter
 webp_quality = 70            # WebP quality of figures in images/ (1-100)
+fix_page_crop_max = 1600     # long side of a whole-page scan crop (v key on the Fixes screen), px
 textlayer_probe_pages = 40   # probe pages for born-digital detection in auto mode
 transport_retries = 2
 max_consecutive_failures = 3

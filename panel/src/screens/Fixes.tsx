@@ -67,7 +67,7 @@ export function FixesScreen(props: { state: AppState; theme: Theme }) {
             const f = cur()!
             const p = contextParts(f, v().math)
             const title = `Context · ${f.page ? `p. ${f.page}` : f.scan}${f.kind ? ` · ${f.kind}` : ""}` +
-              (cols().reason ? "" : f.reason ? ` · ${f.reason}` : "")
+              (cols().reason ? "" : f.reason ? ` · ${f.reason}` : "") + (f.crop ? " · v scan" : "")
             // The line with the fix plus its neighbours: one line above and below, CONTEXT_LINES at most.
             const bl = p.before.split("\n"), al = p.after.split("\n")
             const pre = bl.slice(-2, -1).map(oneLine), post = al.slice(1).map(oneLine).filter(Boolean)

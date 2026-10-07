@@ -153,8 +153,9 @@ class Bridge:
         d = self._book_dir(req)
         why = check_editable(d, self.lib.root)
         j = peek_journal(d) if why else load_journal(d, **self._journal_opts())
+        # out_dir is the absolute book folder: the panel opens a fix's scan crop from it (the v key)
         return {"fixes": [f.to_dict() for f in j.fixes], "counts": j.counts(), "editable": why is None,
-                "why_not": why}
+                "why_not": why, "out_dir": str(d.resolve())}
 
     def _fix_reply(self, j, fix_id: str) -> dict:
         return {"fix": j.get(fix_id).to_dict(), "counts": j.counts()}

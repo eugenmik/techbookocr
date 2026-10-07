@@ -495,6 +495,15 @@ test("fixes screen at 120×30: list, reason column, context with brackets", asyn
   expect(f).toContain("Кагок — 2 шт.")
 })
 
+test("fixes context title offers v scan only when the fix has a scan fragment", async () => {
+  const f = await frame(() => <FixesScreen state={fixesState(120, 30)} theme={makeTheme({})} />, 118, 23)
+  expect(f).toContain("Context · p. 34 · table")
+  expect(f).not.toContain("v scan")
+  const withCrop = { ...FIXDATA, fixes: FIXDATA.fixes.map((x: any, i: number) => (i === 0 ? { ...x, crop: "fixes/0046-b3.webp" } : x)) }
+  const g = await frame(() => <FixesScreen state={fixesState(120, 30, withCrop)} theme={makeTheme({})} />, 118, 23)
+  expect(g).toContain("Context · p. 34 · table · v scan")
+})
+
 test("fixes screen at 80×24 hides the reason column; read-only header; NO_COLOR keeps brackets", async () => {
   const ro = { ...FIXDATA, editable: false, why_not: "book is processing" }
   const f = await frame(() => <FixesScreen state={fixesState(80, 24, ro)} theme={makeTheme({ NO_COLOR: "1" })} />, 78, 17)

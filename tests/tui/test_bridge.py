@@ -243,6 +243,19 @@ def test_fixes_ops(tmp_path, monkeypatch):
     assert b.handle({"id": 6, "op": "fixes", "book": "zzz"})["ok"] is False
 
 
+def test_fixes_reply_has_crop_and_out_dir(tmp_path, monkeypatch):
+    """The fixes reply carries each fix's crop and the absolute book folder: the panel opens the crop on v."""
+    from techbookocr.fixes.journal import Fix, Journal, save_journal
+    b = _bridge(tmp_path, monkeypatch)
+    d = _book_with_fix(tmp_path)
+    save_journal(d / "fixes.json", Journal([Fix(
+        id="0046-1", scan="0046", page="34", block=3, kind="table", was="Specific load (t/mm)",
+        now="Specific load (t mm)", state="applied", before="<td>", after="</td>", crop="fixes/0046-b3.webp")]))
+    r = b.handle({"id": 1, "op": "fixes", "book": "a"})["data"]
+    assert r["fixes"][0]["crop"] == "fixes/0046-b3.webp"
+    assert r["out_dir"] == str(d.resolve())
+
+
 def test_fixes_read_only_while_processing(tmp_path, monkeypatch):
     b = _bridge(tmp_path, monkeypatch)
     monkeypatch.setattr("techbookocr.pipeline.postproc.spell.load_speller", lambda langs, d, log=None: None)

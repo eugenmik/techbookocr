@@ -724,3 +724,138 @@ def test_summary_tolerates_unreadable_files(tmp_path, bad):
     else:
         (d / "fixes.json").mkdir()
     assert summary(d) is None
+
+
+# --- Scan crop of a fix (the v key on the Fixes screen) ---------------------------------------------
+
+class _Pages:
+    """Fake PageImages: get(name) -> page image; fail: pages on which get raises."""
+
+    def __init__(self, size=(1000, 1400), fail=()):
+        from PIL import Image
+        self.img = Image.new("RGB", size, "white")
+        self.fail, self.calls = set(fail), []
+
+    def get(self, page):
+        self.calls.append(page)
+        if page in self.fail:
+            raise OSError(f"cannot read {page}")
+        return self.img
+
+
+def _crop_blocks():
+    from types import SimpleNamespace as NS
+    return [NS(page="0046", ord=3, kind="table", bbox=(100, 220, 900, 400), fixes=[
+                {"was": "Specific load (t/mm)", "now": "Specific load (t mm)"},
+                {"was": "Rol speed", "now": "Roll speed", "rejected": "replaces dictionary word"}]),
+            NS(page="0047", ord=0, kind="text", bbox=(100, 100, 900, 120), fixes=[]),
+            NS(page="0047", ord=1, kind="text", bbox=(100, 200, 900, 220), fixes=[{"was": "10% Mо", "now": "10% Mo"}])]
+
+
+def _crop_pages():
+    from types import SimpleNamespace as NS
+    return [NS(name="0046", printed="34"), NS(name="0047", printed="35")]
+
+
+def test_journal_from_blocks_saves_block_crop_shared_by_block_fixes(tmp_path):
+    """Crop of a block with fixes: fixes/<scan>-b<ord>.webp at the original resolution (bbox + crop_pad),
+    one for all fixes of the block; a block without fixes is not cropped."""
+    from PIL import Image
+
+    from techbookocr.config import PipelineConfig
+    from techbookocr.fixes.journal import read_journal
+    from techbookocr.fixes.review import journal_from_blocks
+    d = _book(tmp_path)
+    imgs = _Pages()
+    j = journal_from_blocks(d, _crop_blocks(), _crop_pages(), images=imgs, cfg=PipelineConfig(crop_pad=12))
+    assert [f.crop for f in j.fixes] == ["fixes/0046-b3.webp", "fixes/0046-b3.webp", "fixes/0047-b1.webp"]
+    assert sorted(p.name for p in (d / "fixes").iterdir()) == ["0046-b3.webp", "0047-b1.webp"]
+    with Image.open(d / "fixes" / "0046-b3.webp") as im:
+        assert (im.format, im.size) == ("WEBP", (824, 204))          # no upscaling
+    assert read_journal(d / "fixes.json").get("0046-1").crop == "fixes/0046-b3.webp"
+
+
+def test_journal_from_blocks_page_block_crop_is_downscaled_page(tmp_path):
+    """A whole-page block and a block without a box give the whole page, long side at most 1600 px."""
+    from types import SimpleNamespace as NS
+
+    from PIL import Image
+
+    from techbookocr.fixes.review import journal_from_blocks
+    d = _book(tmp_path)
+    blocks = [NS(page="0046", ord=0, kind="page", bbox=(0, 0, 2000, 3000), fixes=[{"was": "Rol", "now": "Roll"}]),
+              NS(page="0047", ord=2, kind="text", bbox=None, fixes=[{"was": "Mо", "now": "Mo"}])]
+    j = journal_from_blocks(d, blocks, _crop_pages(), images=_Pages(size=(2000, 3000)))
+    assert [f.crop for f in j.fixes] == ["fixes/0046-b0.webp", "fixes/0047-b2.webp"]
+    for name in ("0046-b0.webp", "0047-b2.webp"):
+        with Image.open(d / "fixes" / name) as im:
+            assert im.size == (1067, 1600)
+
+
+def test_journal_from_blocks_without_images_makes_no_crops(tmp_path):
+    from techbookocr.fixes.review import journal_from_blocks
+    d = _book(tmp_path)
+    (d / "fixes").mkdir()
+    (d / "fixes" / "0001-b0.webp").write_bytes(b"old")                    # from a previous assembly
+    j = journal_from_blocks(d, _crop_blocks(), _crop_pages())
+    assert all(f.crop is None for f in j.fixes)
+    assert not (d / "fixes").exists()
+
+
+def test_journal_from_blocks_rebuild_removes_stale_crops(tmp_path):
+    from techbookocr.fixes.review import journal_from_blocks
+    d = _book(tmp_path)
+    (d / "fixes").mkdir()
+    (d / "fixes" / "0001-b0.webp").write_bytes(b"old")
+    journal_from_blocks(d, _crop_blocks(), _crop_pages(), images=_Pages())
+    assert sorted(p.name for p in (d / "fixes").iterdir()) == ["0046-b3.webp", "0047-b1.webp"]
+
+
+def test_journal_from_blocks_crop_failure_is_logged_not_fatal(tmp_path):
+    """A failed crop of one block goes to the log, its fixes have no crop, the journal and other crops stay."""
+    from techbookocr.fixes.journal import read_journal
+    from techbookocr.fixes.review import journal_from_blocks
+    d = _book(tmp_path)
+    lines: list[str] = []
+    j = journal_from_blocks(d, _crop_blocks(), _crop_pages(), images=_Pages(fail={"0046"}), log=lines.append)
+    assert [f.crop for f in j.fixes] == [None, None, "fixes/0047-b1.webp"]
+    assert len(lines) == 1 and "0046" in lines[0] and "OSError" in lines[0]
+    assert read_journal(d / "fixes.json") == j
+    assert [p.name for p in (d / "fixes").iterdir()] == ["0047-b1.webp"]
+
+
+def test_journal_from_blocks_all_crops_failed_leaves_no_dir(tmp_path):
+    from techbookocr.fixes.review import journal_from_blocks
+    d = _book(tmp_path)
+    j = journal_from_blocks(d, _crop_blocks(), _crop_pages(), images=_Pages(fail={"0046", "0047"}))
+    assert all(f.crop is None for f in j.fixes)
+    assert not (d / "fixes").exists()
+
+
+def test_old_journal_without_crop_loads_and_crop_is_validated(tmp_path):
+    from techbookocr.fixes.journal import Fix, JournalError, read_journal
+    rec = _fix().to_dict()
+    assert rec["crop"] is None
+    del rec["crop"]
+    p = tmp_path / "fixes.json"
+    p.write_text(json.dumps({"version": 1, "fixes": [rec]}), encoding="utf-8")
+    assert read_journal(p).fixes[0].crop is None
+    assert Fix.from_dict({**rec, "crop": "fixes/0046-b3.webp"}).crop == "fixes/0046-b3.webp"
+    with pytest.raises(JournalError):
+        Fix.from_dict({**rec, "crop": 5})
+
+
+def test_page_crop_limit_comes_from_config(tmp_path):
+    """The long-side limit of a whole-page crop is [pipeline] fix_page_crop_max, not a constant in the code."""
+    from types import SimpleNamespace as NS
+
+    from PIL import Image
+
+    from techbookocr.config import PipelineConfig
+    from techbookocr.fixes.review import journal_from_blocks
+    d = _book(tmp_path)
+    blocks = [NS(page="0046", ord=0, kind="page", bbox=(0, 0, 2000, 3000), fixes=[{"was": "Rol", "now": "Roll"}])]
+    journal_from_blocks(d, blocks, _crop_pages(), images=_Pages(size=(2000, 3000)),
+                        cfg=PipelineConfig(fix_page_crop_max=800))
+    with Image.open(d / "fixes" / "0046-b0.webp") as im:
+        assert im.size == (533, 800)

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, spyOn, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -174,4 +174,29 @@ test("a failed fixSet/fixKeep toasts the error and reloads the journal from the 
   const dead: any = { request: async () => { throw new Error("bridge down") }, retarget() {} }
   expect(await runCommand({ kind: "fixKeep", book: "b", id: "x" }, { client: dead, now: () => 1 }))
     .toEqual([{ type: "toast", text: "bridge down", level: "error", now: 1 }])
+})
+
+test("openFile runs xdg-open on the file and toasts its name", async () => {
+  const spawn = spyOn(Bun, "spawn").mockImplementation((() => ({})) as never)
+  const file = join(mkdtempSync(join(tmpdir(), "crop-")), "0046-b3.webp")
+  writeFileSync(file, "x")
+  try {
+    const acts = await runCommand({ kind: "openFile", path: file }, { client: {} as never, now: () => 7 })
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(spawn.mock.calls[0]![0]).toEqual(["xdg-open", file])
+    expect(acts).toEqual([{ type: "toast", text: "opened 0046-b3.webp", level: "info", now: 7 }])
+  } finally {
+    spawn.mockRestore()
+  }
+})
+
+test("openFile of a missing file is an error toast, xdg-open is not run", async () => {
+  const spawn = spyOn(Bun, "spawn").mockImplementation((() => ({})) as never)
+  try {
+    const acts = await runCommand({ kind: "openFile", path: "/nonexistent/fixes/x.webp" }, { client: {} as never, now: () => 7 })
+    expect(spawn).not.toHaveBeenCalled()
+    expect(acts).toEqual([{ type: "toast", text: "scan fragment missing: /nonexistent/fixes/x.webp", level: "error", now: 7 }])
+  } finally {
+    spawn.mockRestore()
+  }
 })

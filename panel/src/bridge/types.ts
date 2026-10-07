@@ -44,9 +44,10 @@ export interface Fix {
   id: string; scan: string; page: string | null; block: number | null; kind: string | null
   was: string; now: string; state: FixState; suggested: boolean; reason: string | null
   decided_by: "model" | "rule" | "user"; before: string; after: string
+  crop?: string | null            // scan crop of the block, relative to the book folder; older books have none
 }
 export interface FixCounts { applied: number; reverted: number; suggested: number; not_found: number }
-export interface FixesData { fixes: Fix[]; counts: FixCounts; editable: boolean; why_not: string | null }
+export interface FixesData { fixes: Fix[]; counts: FixCounts; editable: boolean; why_not: string | null; out_dir?: string }
 export interface FixSummary { total: number; suggested: number | null; reviewed: boolean }
 export type FieldValue = string | number | boolean | null
 export interface SettingField {

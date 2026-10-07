@@ -39,6 +39,7 @@ class Fix:
     decided_by: str = "model"
     before: str = ""
     after: str = ""
+    crop: str | None = None     # scan crop of the block, relative to the book folder ("fixes/0046-b3.webp")
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -54,7 +55,8 @@ class Fix:
             raise JournalError(f"bad fix record: {d!r}") from e
         text = all(isinstance(getattr(fx, n), str) for n in ("id", "scan", "was", "now", "before", "after",
                                                              "decided_by"))
-        opt = all(v is None or isinstance(v, t) for v, t in ((fx.page, str), (fx.kind, str), (fx.reason, str)))
+        opt = all(v is None or isinstance(v, t)
+                  for v, t in ((fx.page, str), (fx.kind, str), (fx.reason, str), (fx.crop, str)))
         blk = fx.block is None or (isinstance(fx.block, int) and not isinstance(fx.block, bool))
         if not (text and opt and blk and isinstance(fx.suggested, bool)) or fx.state not in STATES:
             raise JournalError(f"bad fix record: {d!r}")

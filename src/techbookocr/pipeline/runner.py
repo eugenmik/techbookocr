@@ -107,10 +107,11 @@ def finish_book(state: BookState, out_dir: Path, *, book_name: str, source: str,
                                      post.spans, post.suspects))
     try:  # fix journal for the Fixes screen; a failure does not break assembly, the journal is rebuilt from quality.md
         from techbookocr.fixes.review import journal_from_blocks
-        journal_from_blocks(out_dir, blocks, pages)
+        journal_from_blocks(out_dir, blocks, pages, images=images, cfg=pipeline, log=log)  # + scan crops
     except Exception as e:  # noqa: BLE001
         log(f"fix journal: {type(e).__name__}: {e}")
         (out_dir / "fixes.json").unlink(missing_ok=True)  # the old journal does not match the new book.md
+        shutil.rmtree(out_dir / "fixes", ignore_errors=True)  # nor do the scan crops of the previous assembly
     state.mark_done("assemble")
 
 
