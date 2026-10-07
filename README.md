@@ -153,7 +153,8 @@ Settings live in `techbookocr.toml`. The ones you are most likely to change:
 | `[pipeline] mode` | `fast` | `fast` or `cascade` |
 | `[pipeline] text_layer` | `auto` | use the PDF text layer: `auto`, `force`, or `off` |
 | `[pipeline] sketches_device` | `gpu` | where the table-sketch detector runs |
-| `[pipeline] webp_quality` | `70` | quality of the cropped figures |
+| `[pipeline] webp_quality` | `70` | quality of the cropped figures and scan fragments |
+| `[pipeline] fix_page_crop_max` | `1600` | long side, in pixels, of a whole-page scan fragment for the Fixes screen |
 | `[pipeline] fix_reject_dictionary_words` | `true` | undo arbiter fixes that replace a dictionary word |
 | `[render] min_dpi`, `max_dpi` | `300`, `600` | render resolution for scans |
 | `[library] dir` | `out` | library root: queue database and book folders |
@@ -168,12 +169,13 @@ out/<book>/
   <Book>.md      # table-of-contents note for Obsidian
   images/        # cropped figures (WebP)
   fixes.json     # misprint fixes and the decisions about them
+  fixes/         # scan fragments of the blocks with fixes (v on the Fixes screen)
   quality.md     # corrections, failed blocks, unknown words, time per stage
   meta.json      # metadata and statistics
 out/rejected-fixes.json   # fixes you reverted by hand; later books revert them too
 ```
 
-To use a book in Obsidian, copy `book.md`, the table-of-contents note, `images/`, and the library's `books-index.md` into your vault. `fixes.json`, `meta.json` and `rejected-fixes.json` are working files and do not belong there.
+To use a book in Obsidian, copy `book.md`, the table-of-contents note, `images/`, and the library's `books-index.md` into your vault. `fixes.json`, the `fixes/` folder, `meta.json` and `rejected-fixes.json` are working files and do not belong there.
 
 ## Terminal panel
 
@@ -255,6 +257,10 @@ The rules above cannot catch every bad fix, so you can go through a book's fixes
 
 Below the list is the selected fix in its place in `book.md`, with the current wording in ⟦brackets⟧ and the other wording underneath. `Space` switches between the arbiter's text and the printed text right in `book.md`. `Enter` keeps a `?` fix as it is and clears the mark. `n` jumps to the next `?`, `/` cycles the filter (all, to review, applied, printed, not found), `PgUp`/`PgDn` move ten lines, and `Esc` goes back. The book card on the Queue screen shows a summary such as `Fixes 25 · 3 to review · f`.
 
+Formula markup in the list and in the context is shown in readable form. `<sub>` and `<sup>` tags, and simple LaTeX inside `$…$`, become Unicode subscripts and superscripts, so `σ<sub>-1p</sub>` reads as `σ₋₁ₚ` and `$\frac{a+b}{c}$` as `(a+b)/c`. Characters without a Unicode subscript or superscript form, such as Cyrillic letters, are written in a compact `x_{ab}` notation. If the two variants of a fix look the same in readable form, because the fix only changes the markup, that fix is shown as raw markup. `m` switches the screen between readable and raw. Only the display changes; `book.md` and `fixes.json` stay as they are.
+
+To compare a fix with the page, press `v`. It opens the scan fragment of the block that holds the fix in the system image viewer (through `xdg-open`). Assembly cuts one fragment for every block that has fixes and saves it as `out/<book>/fixes/<scan>-b<block>.webp`, at the resolution the page was rendered at. A block that covers the whole page, or has no bounding box, is saved as the whole page, scaled down so that its long side is at most `[pipeline] fix_page_crop_max` pixels (1600 by default). When a fix has a fragment, the context title ends with `· v scan`. Books assembled before this feature have no fragments, and `v` says so.
+
 The same works from the command line, one action at a time:
 
 ```bash
@@ -272,7 +278,7 @@ While a book is being processed its fixes are read-only. Rebuilding a book from 
 
 ## How it was built
 
-Every part of the project started as a written design, then an implementation plan split into small tasks. Each task was written test first and reviewed before the next one began. The repository has about 780 Python tests and 150 tests for the panel (`uv run pytest`, `cd panel && bun test`).
+Every part of the project started as a written design, then an implementation plan split into small tasks. Each task was written test first and reviewed before the next one began. The repository has about 790 Python tests and 175 tests for the panel (`uv run pytest`, `cd panel && bun test`).
 
 The models were picked on a golden set of 31 pages whose correct text was checked by hand. Five OCR models ran on those pages, and the comparison of character error rate, numbers, table structure, formulas, figures, and speed is in [`eval/recommendation.md`](eval/recommendation.md). The thresholds of the consensus and arbiter stages came from a sweep on the same pages ([`eval/cascade-report.md`](eval/cascade-report.md)), and full books were then run end to end and compared page by page with the scans. Problems found that way, such as a value that spans several columns or an arbiter edit that changed a number, became separate fixes; the ones still open are in [`docs/known-issues.md`](docs/known-issues.md).
 
