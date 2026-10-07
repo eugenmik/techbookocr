@@ -77,7 +77,8 @@ def page_entries(refs, work_dir: Path) -> list[PageEntry]:
 
 
 def finish_book(state: BookState, out_dir: Path, *, book_name: str, source: str, lang: str, mode: str,
-                models: dict[str, str], speller, pipeline=None, images=None) -> None:
+                models: dict[str, str], speller, pipeline=None, images=None,
+                log: Callable[[str], None] = lambda m: None) -> None:
     """Postprocessing and assembly: book.md, <book_name>.md (MOC), meta.json, quality.md.
     A pure function of state — repeated calls are safe."""
     pages = state.pages()
@@ -104,6 +105,12 @@ def finish_book(state: BookState, out_dir: Path, *, book_name: str, source: str,
     write_text_atomic(out_dir / "quality.md",
                       render_quality(book_name, pages, blocks, stats, post.spell, notes, state.timings(),
                                      post.spans, post.suspects))
+    try:  # fix journal for the Fixes screen; a failure does not break assembly, the journal is rebuilt from quality.md
+        from techbookocr.fixes.review import journal_from_blocks
+        journal_from_blocks(out_dir, blocks, pages)
+    except Exception as e:  # noqa: BLE001
+        log(f"fix journal: {type(e).__name__}: {e}")
+        (out_dir / "fixes.json").unlink(missing_ok=True)  # the old journal does not match the new book.md
     state.mark_done("assemble")
 
 
@@ -377,7 +384,15 @@ def run_pages(entries: list[PageEntry], out_dir: Path, cfg: Config, opts: RunOpt
             log(f"consensus: {run_consensus(state, p.tau_text, opts.mode)}")
         if state.pending("arbiter") and models_on:
             prep_images()
-            with_model("arbiter", p.arbiter_model, lambda m: _guarded(guard(), lambda g: run_arbiter(state, m, work, p, lang, g, log)),
+            # dictionary for the "replaces dictionary word" rule in sanitize_fixes (reverting arbiter fixes)
+            fix_speller = (speller_factory(speller_langs(lang), Path(p.dict_dir).expanduser(), log)
+                           if p.fix_reject_dictionary_words else None)
+            # pairs the user reverted on the Fixes screen (out/rejected-fixes.json in the library root)
+            from techbookocr.fixes.rejected import denied_pairs
+            denied = denied_pairs(Path(cfg.library.dir), log)
+            with_model("arbiter", p.arbiter_model,
+                       lambda m: _guarded(guard(), lambda g: run_arbiter(state, m, work, p, lang, g, log,
+                                                                         speller=fix_speller, denied=denied)),
                        lambda m: _ping(lambda: m.ask(_canary_image(), "Reply with the single word OK.", max_tokens=16)))
 
         if state.pending("postproc") or state.pending("assemble"):
@@ -394,7 +409,7 @@ def run_pages(entries: list[PageEntry], out_dir: Path, cfg: Config, opts: RunOpt
                 images = PdfPageImages(work, {pg.name: pg.file for pg in state.pages()},
                                        Path(source), state.pages())
             finish_book(state, out_dir, book_name=book_name, source=source, lang=lang, mode=opts.mode,
-                        models=models, speller=speller, pipeline=p, images=images)
+                        models=models, speller=speller, pipeline=p, images=images, log=log)
             state.add_seconds("assemble", time.monotonic() - t0)
             if textlayer:
                 pend_pages = state.pending("layout")

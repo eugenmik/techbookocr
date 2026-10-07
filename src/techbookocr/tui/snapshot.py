@@ -258,6 +258,7 @@ def issues_from_state(path: Path) -> list[str]:
 
 def book_detail(lib: Library, name: str) -> dict:
     """Book details for the Book screen: in progress, state.sqlite; finished, meta.json and quality.md."""
+    from techbookocr.fixes.review import summary as fix_summary
     from techbookocr.pipeline.state import STAGES
 
     row = lib.book(name)  # KeyError: the bridge replies ok: false
@@ -292,4 +293,5 @@ def book_detail(lib: Library, name: str) -> dict:
             "scans": lib.scans(name), "pages": pages, "added_at": row.added_at, "updated_at": row.updated_at,
             "status": row.status, "error": row.error}
     issues = issues_from_quality(qmd) if qmd else (issues_from_state(sp) if has_state else [])
-    return {"info": info, "stages": stages, "issues": issues, "quality_md": qmd, "out_dir": str(out.resolve())}
+    return {"info": info, "stages": stages, "issues": issues, "quality_md": qmd, "out_dir": str(out.resolve()),
+            "fixes": fix_summary(out)}

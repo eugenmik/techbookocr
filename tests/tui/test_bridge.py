@@ -213,3 +213,72 @@ def test_settings_get_broken_toml_is_error(tmp_path, monkeypatch):
     assert r["ok"] is False and r["error"]
     b.toml.write_text('[pipeline]\nmode = "bogus"\n', encoding="utf-8")
     assert b.handle({"id": 2, "op": "settings_get"})["ok"] is False
+
+
+def _book_with_fix(tmp_path):
+    d = tmp_path / "a"
+    d.mkdir(exist_ok=True)
+    (d / "book.md").write_text("<!-- page: 34 scan: 0046 -->\n\n<td>Specific load (t mm)</td>\n", encoding="utf-8")
+    (d / "quality.md").write_text("## Misprint and print-defect fixes\n\n| Page | Was | Now |\n|---|---|---|\n"
+                                  "| 0046 (p. 34) | Specific load (t/mm) | Specific load (t mm) |\n", encoding="utf-8")
+    return d
+
+
+def test_fixes_ops(tmp_path, monkeypatch):
+    b = _bridge(tmp_path, monkeypatch)
+    monkeypatch.setattr("techbookocr.pipeline.postproc.spell.load_speller", lambda langs, d, log=None: None)
+    d = _book_with_fix(tmp_path)
+    assert b.handle({"id": 1, "op": "book", "name": "a"})["data"]["fixes"] == \
+        {"total": 1, "suggested": None, "reviewed": False}
+    r = b.handle({"id": 2, "op": "fixes", "book": "a"})["data"]
+    assert r["editable"] is True and r["why_not"] is None
+    assert r["fixes"][0]["state"] == "reverted" and r["counts"]["reverted"] == 1     # the rule reverted it
+    r = b.handle({"id": 3, "op": "fix_set", "book": "a", "fix": "0046-1", "applied": True})
+    assert r["ok"] and r["data"]["fix"]["state"] == "applied" and r["data"]["counts"]["applied"] == 1
+    assert "Specific load (t mm)" in (d / "book.md").read_text(encoding="utf-8")
+    r = b.handle({"id": 4, "op": "fix_keep", "book": "a", "fix": "0046-1"})
+    assert r["ok"] and r["data"]["fix"]["decided_by"] == "user"
+    r = b.handle({"id": 5, "op": "fix_set", "book": "a", "fix": "nope", "applied": False})
+    assert r["ok"] is False and "nope" in r["error"]
+    assert b.handle({"id": 6, "op": "fixes", "book": "zzz"})["ok"] is False
+
+
+def test_fixes_read_only_while_processing(tmp_path, monkeypatch):
+    b = _bridge(tmp_path, monkeypatch)
+    monkeypatch.setattr("techbookocr.pipeline.postproc.spell.load_speller", lambda langs, d, log=None: None)
+    d = _book_with_fix(tmp_path)
+    b.lib.set_status("a", "processing")
+    r = b.handle({"id": 1, "op": "fixes", "book": "a"})["data"]
+    assert r["editable"] is False and r["why_not"] == "book is processing" and len(r["fixes"]) == 1
+    assert not (d / "fixes.json").exists()                                  # read-only: no files are written
+    r = b.handle({"id": 2, "op": "fix_set", "book": "a", "fix": "0046-1", "applied": False})
+    assert r["ok"] is False and "processing" in r["error"]
+
+
+def test_book_op_survives_unreadable_quality(tmp_path, monkeypatch):
+    """A non-UTF-8 quality.md: the Book screen opens, the fix summary is null."""
+    b = _bridge(tmp_path, monkeypatch)
+    d = _book_with_fix(tmp_path)
+    (d / "quality.md").write_bytes(b"## Misprint and print-defect fixes\n\xff\xfe bad\n")
+    r = b.handle({"id": 1, "op": "book", "name": "a"})
+    assert r["ok"], r
+    assert r["data"]["fixes"] is None
+
+
+def test_fix_set_first_call_builds_journal_with_dictionary(tmp_path, monkeypatch):
+    """fix_set is the first to build an older book's journal, with the dictionary: the neighbouring fix keeps its "?"."""
+    class Sp:
+        def known(self, w):
+            return w.lower() in {"катак", "каток", "шт"}
+    b = _bridge(tmp_path, monkeypatch)
+    monkeypatch.setattr("techbookocr.pipeline.postproc.spell.load_speller", lambda langs, d, log=None: Sp())
+    d = _book_with_fix(tmp_path)
+    (d / "book.md").write_text("<!-- page: 34 scan: 0046 -->\n\n<td>Specific load (t mm)</td> Каток — 2 шт.\n",
+                               encoding="utf-8")
+    with (d / "quality.md").open("a", encoding="utf-8") as fh:
+        fh.write("| 0046 (p. 34) | Катак — 2 шт. | Каток — 2 шт. |\n")
+    r = b.handle({"id": 1, "op": "fix_set", "book": "a", "fix": "0046-1", "applied": True})
+    assert r["ok"], r
+    assert r["data"]["counts"]["suggested"] == 1
+    r = b.handle({"id": 2, "op": "fix_keep", "book": "a", "fix": "0046-2"})
+    assert r["ok"] and r["data"]["fix"]["decided_by"] == "user" and r["data"]["counts"]["suggested"] == 0

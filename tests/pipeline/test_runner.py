@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from techbookocr.config import Config, ModelSpec, PipelineConfig
+from techbookocr.config import Config, LibraryConfig, ModelSpec, PipelineConfig
 from techbookocr.models.errors import TransportError
 from techbookocr.models.types import BlockResult
 from techbookocr.pipeline.control import RunStopped
@@ -436,3 +436,76 @@ def test_control_stop_leaves_book_resumable(tmp_path):
     run_pages(entries, tmp_path / "out", CFG, RunOptions(), book_name="Книга", source="b.djvu",
               **fake_deps(Servers(), fake_adapters()))  # without control it runs to the end
     assert (tmp_path / "out" / "book.md").exists()
+
+
+def test_arbiter_gets_speller_for_dictionary_rule(tmp_path):
+    """[pipeline] fix_reject_dictionary_words: the runner passes a dictionary to the arbiter, so a dictionary word
+    replacement is reverted and lands in quality.md; with the key off the arbiter does not need a dictionary."""
+    from tests.pipeline.fakes import TEXT, TABLE_B
+
+    class Speller:
+        def known(self, word):
+            return word.lower() in {"содержит", "включает"}
+
+    fix = '\nFIXES: [{"was": "содержит", "now": "включает"}]'
+    # the table reaches the arbiter (text A and B agreed at consensus)
+    arbiter = FakeVLM(lambda prompt: BlockResult(TABLE_B + fix if "one table block" in prompt else TEXT + "\nFIXES: []",
+                                                 seconds=1.0))
+    for on in (True, False):
+        calls = []
+
+        def factory(langs, cache_dir, log, calls=calls):
+            calls.append(langs)
+            return Speller()
+
+        cfg = Config(models=MODELS, pipeline=PipelineConfig(fix_reject_dictionary_words=on))
+        deps = fake_deps(Servers(), fake_adapters(arbiter=arbiter)) | {"speller_factory": factory}
+        base = tmp_path / str(on)
+        page_png(base / "out" / "work" / "pages" / "0001.png")
+        out = run_pages([PageEntry(name="0001", idx=0, scan=0, side="", file="pages/0001.png", width=1000, height=1400)],
+                        base / "out", cfg, RunOptions(mode="cascade"), book_name="Книга", source="book.djvu", **deps)
+        quality = (out / "quality.md").read_text(encoding="utf-8")
+        assert ("replaces dictionary word" in quality) is on
+        assert len(calls) == (2 if on else 1)  # arbiter + postprocessing / postprocessing only
+
+
+def test_assemble_writes_fix_journal_and_arbiter_gets_denied_pairs(tmp_path):
+    """Assembly writes out/<book>/fixes.json; a pair from out/rejected-fixes.json is reverted by the arbiter."""
+    from tests.pipeline.fakes import TABLE_B, TEXT
+
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "rejected-fixes.json").write_text(json.dumps({"version": 1, "pairs": [
+        {"was": "15—25", "now": "15—35", "books": ["x"]}]}), encoding="utf-8")
+    fix = '\nFIXES: [{"was": "15—25", "now": "15—35"}]'
+    arbiter = FakeVLM(lambda p: BlockResult(TABLE_B.replace("15—25", "15—35") + fix if "one table block" in p
+                                            else TEXT + "\nFIXES: []", seconds=1.0))
+    cfg = Config(models=MODELS, pipeline=PipelineConfig(fix_reject_dictionary_words=False),
+                 library=LibraryConfig(dir=str(lib)))
+    page_png(lib / "book" / "work" / "pages" / "0001.png")
+    out = run_pages([PageEntry(name="0001", idx=0, scan=0, side="", file="pages/0001.png", width=1000, height=1400)],
+                    lib / "book", cfg, RunOptions(mode="cascade"), book_name="Книга", source="book.djvu",
+                    **fake_deps(Servers(), fake_adapters(arbiter=arbiter)))
+    journal = json.loads((out / "fixes.json").read_text(encoding="utf-8"))
+    f = journal["fixes"][0]
+    assert (f["was"], f["now"], f["state"], f["reason"]) == ("15—25", "15—35", "reverted", "rejected by user")
+    assert f["decided_by"] == "user"
+    assert "15—25" in (out / "book.md").read_text(encoding="utf-8")
+
+
+def test_fix_journal_failure_is_logged_and_stale_journal_removed(tmp_path, monkeypatch):
+    """A failure to build the journal does not break assembly, it is logged and the old fixes.json is removed."""
+    def boom(*a, **kw):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("techbookocr.fixes.review.journal_from_blocks", boom)
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "fixes.json").write_text("{}", encoding="utf-8")
+    lines: list[str] = []
+    page_png(tmp_path / "out" / "work" / "pages" / "0001.png")
+    deps = {**fake_deps(Servers(), fake_adapters()), "echo": lines.append}
+    out = run_pages([PageEntry(name="0001", idx=0, scan=0, side="", file="pages/0001.png", width=1000, height=1400)],
+                    tmp_path / "out", CFG, RunOptions(mode="cascade"), book_name="Книга", source="book.djvu", **deps)
+    assert (out / "book.md").exists()
+    assert not (out / "fixes.json").exists()
+    assert any("fix journal: RuntimeError: boom" in ln for ln in lines)

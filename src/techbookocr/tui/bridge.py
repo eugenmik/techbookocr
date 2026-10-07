@@ -128,11 +128,61 @@ class Bridge:
     def op_log_tail(self, req: dict) -> dict:
         return {"lines": snapshot.log_tail(self.lib.root, int(req.get("lines") or 200))}
 
+    # --- arbiter fixes (fixes.json journal) ---
+
+    def _book_dir(self, req: dict) -> Path:
+        name = str(req.get("book", ""))
+        d = self.lib.root / name
+        if not name or not (d / "book.md").exists():
+            raise OpError(f"no assembled book {name}")
+        return d
+
+    def _journal_opts(self) -> dict:
+        """Library root and dictionary for building the journal of an older book (any call may be the first one)."""
+        from techbookocr.pipeline.postproc.spell import load_speller
+
+        p = self.cfg.pipeline
+        factory = (lambda langs: load_speller(langs, Path(p.dict_dir).expanduser())) \
+            if p.fix_reject_dictionary_words else None
+        return {"library_root": self.lib.root, "speller_factory": factory, "dict_min_len": p.fix_dictionary_min_len}
+
+    def op_fixes(self, req: dict) -> dict:
+        """The book's fix journal. A book in progress is read-only (peek_journal, no files are written)."""
+        from techbookocr.fixes.review import check_editable, load_journal, peek_journal
+
+        d = self._book_dir(req)
+        why = check_editable(d, self.lib.root)
+        j = peek_journal(d) if why else load_journal(d, **self._journal_opts())
+        return {"fixes": [f.to_dict() for f in j.fixes], "counts": j.counts(), "editable": why is None,
+                "why_not": why}
+
+    def _fix_reply(self, j, fix_id: str) -> dict:
+        return {"fix": j.get(fix_id).to_dict(), "counts": j.counts()}
+
+    def op_fix_set(self, req: dict) -> dict:
+        from techbookocr.fixes.review import FixError, set_fix
+
+        d, fid = self._book_dir(req), str(req.get("fix", ""))
+        try:
+            return self._fix_reply(set_fix(d, fid, bool(req.get("applied")), **self._journal_opts()), fid)
+        except (FixError, KeyError) as e:
+            raise OpError(f"{fid}: {e}") from None
+
+    def op_fix_keep(self, req: dict) -> dict:
+        from techbookocr.fixes.review import FixError, keep_fix
+
+        d, fid = self._book_dir(req), str(req.get("fix", ""))
+        try:
+            return self._fix_reply(keep_fix(d, fid, **self._journal_opts()), fid)
+        except (FixError, KeyError) as e:
+            raise OpError(f"{fid}: {e}") from None
+
 
 _OPS: dict[str, Callable[[Bridge, dict], dict]] = {
     "snapshot": Bridge.op_snapshot, "book": Bridge.op_book, "act": Bridge.op_act, "add": Bridge.op_add,
     "settings_get": Bridge.op_settings_get, "settings_set": Bridge.op_settings_set,
-    "log_tail": Bridge.op_log_tail,
+    "log_tail": Bridge.op_log_tail, "fixes": Bridge.op_fixes, "fix_set": Bridge.op_fix_set,
+    "fix_keep": Bridge.op_fix_keep,
 }
 
 

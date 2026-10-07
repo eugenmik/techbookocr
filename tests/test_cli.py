@@ -183,3 +183,87 @@ def test_summarize_cli_all_idempotent(tmp_path, monkeypatch):
     monkeypatch.setattr(smz, "make_summarizer", fake)
     r = CliRunner().invoke(app, ["summarize", "--all", "--out", str(tmp_path)])
     assert "Книга" in r.output
+
+
+def test_fixes_command_lists_and_toggles(tmp_path):
+    d = tmp_path / "cantor"
+    d.mkdir()
+    (d / "book.md").write_text("<!-- page: 34 scan: 0046 -->\n\n<td>Specific load (t mm)</td>\n", encoding="utf-8")
+    (d / "quality.md").write_text("## Misprint and print-defect fixes\n\n| Page | Was | Now |\n|---|---|---|\n"
+                                  "| 0046 (p. 34) | Specific load (t/mm) | Specific load (t mm) |\n", encoding="utf-8")
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(f'[library]\ndir = "{tmp_path}"\n[pipeline]\nfix_reject_dictionary_words = false\n', encoding="utf-8")
+    r = CliRunner().invoke(app, ["fixes", "cantor", "--config", str(cfg)])
+    assert r.exit_code == 0, r.output
+    assert "0046-1" in r.output and "Specific load (t/mm) → Specific load (t mm)" in r.output
+    assert "changes operator" in r.output            # rules applied: the rule reverted the fix while building the journal
+    r = CliRunner().invoke(app, ["fixes", "cantor", "--apply", "0046-1", "--config", str(cfg)])
+    assert r.exit_code == 0 and "Specific load (t mm)" in (d / "book.md").read_text(encoding="utf-8")
+    r = CliRunner().invoke(app, ["fixes", "cantor", "--revert", "nope", "--config", str(cfg)])
+    assert r.exit_code == 1 and "nope" in r.output
+    r = CliRunner().invoke(app, ["fixes", "missing", "--config", str(cfg)])
+    assert r.exit_code == 2
+
+
+def _fix_book(tmp_path, dictionary=False):
+    d = tmp_path / "cantor"
+    d.mkdir()
+    (d / "book.md").write_text("<!-- page: 34 scan: 0046 -->\n\n<td>Specific load (t mm)</td> Каток — 2 шт.\n",
+                               encoding="utf-8")
+    (d / "quality.md").write_text("## Misprint and print-defect fixes\n\n| Page | Was | Now |\n|---|---|---|\n"
+                                  "| 0046 (p. 34) | Specific load (t/mm) | Specific load (t mm) |\n"
+                                  "| 0046 (p. 34) | Катак — 2 шт. | Каток — 2 шт. |\n", encoding="utf-8")
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(f'[library]\ndir = "{tmp_path}"\n[pipeline]\n'
+                   f'fix_reject_dictionary_words = {"true" if dictionary else "false"}\n', encoding="utf-8")
+    return d, cfg
+
+
+@pytest.mark.parametrize("args", [["--revert", "0046-1", "--apply", "0046-2"],
+                                  ["--revert", "0046-1", "--keep", "0046-1"],
+                                  ["--revert", ""], ["--keep", ""]])
+def test_fixes_command_rejects_conflicting_or_empty_ids(tmp_path, args):
+    d, cfg = _fix_book(tmp_path)
+    md = (d / "book.md").read_bytes()
+    r = CliRunner().invoke(app, ["fixes", "cantor", *args, "--config", str(cfg)])
+    assert r.exit_code == 2, r.output
+    assert (d / "book.md").read_bytes() == md and not (d / "fixes.json").exists()
+
+
+def test_fixes_command_revert_restores_printed_text(tmp_path):
+    d, cfg = _fix_book(tmp_path)
+    r = CliRunner().invoke(app, ["fixes", "cantor", "--revert", "0046-2", "--config", str(cfg)])
+    assert r.exit_code == 0, r.output
+    assert "Катак — 2 шт." in (d / "book.md").read_text(encoding="utf-8")
+    assert "rejected by user" in r.output
+
+
+def test_fixes_command_read_only_while_processing(tmp_path):
+    from techbookocr.library import Library
+    d, cfg = _fix_book(tmp_path)
+    (tmp_path / "cantor.djvu").touch()
+    with Library(tmp_path) as lib:
+        lib.add([tmp_path / "cantor.djvu"])
+        lib.set_status("cantor", "processing")
+    md, q = (d / "book.md").read_bytes(), (d / "quality.md").read_bytes()
+    r = CliRunner().invoke(app, ["fixes", "cantor", "--config", str(cfg)])
+    assert r.exit_code == 0, r.output
+    assert "read-only: book is processing" in r.output and "0046-1" in r.output
+    assert not (d / "fixes.json").exists()
+    assert (d / "book.md").read_bytes() == md and (d / "quality.md").read_bytes() == q
+    r = CliRunner().invoke(app, ["fixes", "cantor", "--revert", "0046-2", "--config", str(cfg)])
+    assert r.exit_code == 1 and "processing" in r.output
+    assert (d / "book.md").read_bytes() == md and not (d / "fixes.json").exists()
+
+
+def test_fixes_command_first_revert_builds_journal_with_dictionary(tmp_path, monkeypatch):
+    """The first call on an older book is --revert: the journal is built with the dictionary, no "?" is lost."""
+    class Sp:
+        def known(self, w):
+            return w.lower() in {"катак", "каток", "шт"}
+    monkeypatch.setattr("techbookocr.pipeline.postproc.spell.load_speller", lambda langs, d, log=None: Sp())
+    d, cfg = _fix_book(tmp_path, dictionary=True)
+    r = CliRunner().invoke(app, ["fixes", "cantor", "--apply", "0046-1", "--config", str(cfg)])
+    assert r.exit_code == 0, r.output
+    from techbookocr.fixes.journal import read_journal
+    assert read_journal(d / "fixes.json").get("0046-2").suggested is True

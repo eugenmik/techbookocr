@@ -508,6 +508,60 @@ def summarize(
         raise typer.Exit(1)
 
 
+_FIX_ICON = {"applied": "✓", "reverted": "↶", "not_found": "·"}
+
+
+@app.command()
+def fixes(
+    name: str = typer.Argument(..., help="Book name (directory under the library root) or path to it"),
+    revert: str = typer.Option(None, "--revert", help="Fix id: restore the printed text"),
+    apply: str = typer.Option(None, "--apply", help="Fix id: apply the arbiter's fix"),
+    keep: str = typer.Option(None, "--keep", help="Fix id: keep as is, clear the rule suggestion"),
+    out: Path = typer.Option(None, help="Library root (default — [library] dir from config)"),
+    config: Path = typer.Option(None, help="Path to techbookocr.toml"),
+) -> None:
+    """Misprint fixes of an assembled book: list, revert to the printed text, apply, keep."""
+    from techbookocr.fixes.review import FixError, check_editable, keep_fix, load_journal, peek_journal, set_fix
+    from techbookocr.pipeline.postproc.spell import load_speller
+
+    given = [(flag, v) for flag, v in (("--revert", revert), ("--apply", apply), ("--keep", keep)) if v is not None]
+    if len(given) > 1:
+        typer.echo(f"{', '.join(f for f, _ in given)}: only one action at a time", err=True)
+        raise typer.Exit(2)
+    if given and not given[0][1]:
+        typer.echo(f"{given[0][0]}: empty fix id", err=True)
+        raise typer.Exit(2)
+    cfg = _load_cfg(config)
+    root = Path(out) if out is not None else Path(cfg.library.dir)
+    book_dir = Path(name) if Path(name).is_dir() else root / name
+    if not (book_dir / "book.md").exists():
+        typer.echo(f"no assembled book: {book_dir}", err=True)
+        raise typer.Exit(2)
+    lib_root = book_dir.parent
+    p = cfg.pipeline
+    factory = (lambda langs: load_speller(langs, Path(p.dict_dir).expanduser())) \
+        if p.fix_reject_dictionary_words else None
+    opts = {"library_root": lib_root, "speller_factory": factory, "dict_min_len": p.fix_dictionary_min_len}
+    try:
+        if revert is not None or apply is not None:
+            journal = set_fix(book_dir, apply if apply is not None else revert, apply is not None, **opts)
+        elif keep is not None:
+            journal = keep_fix(book_dir, keep, **opts)
+        elif (why := check_editable(book_dir, lib_root)):
+            # book in progress: read-only, no files are written
+            typer.echo(f"read-only: {why}", err=True)
+            journal = peek_journal(book_dir)
+        else:
+            journal = load_journal(book_dir, **opts)
+    except (FixError, KeyError) as e:
+        typer.echo(f"{name}: {e}", err=True)
+        raise typer.Exit(1)
+    for f in journal.fixes:
+        icon = "?" if f.suggested else _FIX_ICON[f.state]
+        ref = f"{f.scan} p.{f.page}" if f.page else f.scan
+        typer.echo(f"{f.id:10} {icon} {ref:14} {f.was} → {f.now}  {f.reason or ''}".rstrip())
+
+
 def find_panel(env: dict, which=shutil.which, repo: Path | None = None) -> Path | None:
     """Panel binary: $TECHBOOKOCR_TUI -> the repo's panel/dist/techbookocr-tui -> techbookocr-tui on PATH."""
     if env.get("TECHBOOKOCR_TUI"):
