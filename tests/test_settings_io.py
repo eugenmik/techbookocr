@@ -103,11 +103,12 @@ def test_field_list_values_choices_comments(tmp_path):
                     '[models.m1]\nadapter = "dots"\nimage = "i"\nmodel = "m"\n', encoding="utf-8")
     fields = {(f["section"], f["key"]): f for f in field_list(toml)}
     assert fields[("pipeline", "mode")]["value"] == "fast"
-    assert fields[("pipeline", "mode")]["comment"] == "быстрый режим"
-    assert fields[("pipeline", "webp_quality")] == {"section": "pipeline", "key": "webp_quality", "kind": "int",
-                                                    "choices": [], "value": 70, "comment": "качество WebP"}
+    # help texts in the panel come from the code; the toml comments are not shown
+    assert fields[("pipeline", "mode")]["comment"].startswith("fast: ")
+    assert fields[("pipeline", "webp_quality")]["value"] == 70
+    assert fields[("pipeline", "webp_quality")]["comment"] == "WebP quality of cropped figures and scan fragments (1-100)"
     assert fields[("pipeline", "sketches_device")]["choices"] == ["cpu", "gpu"]
-    assert fields[("pipeline", "text_layer")]["comment"] is None
+    assert all(f["comment"] and f["comment"].isascii() for f in fields.values())
     assert "m1" in fields[("pipeline", "summarizer_model")]["choices"]
 
 

@@ -51,7 +51,7 @@ def test_handle_operation_error_is_reply(tmp_path, monkeypatch):
 def test_settings_get_set_and_library_switch(tmp_path, monkeypatch):
     b = _bridge(tmp_path, monkeypatch)
     fields = b.handle({"id": 1, "op": "settings_get"})["data"]["fields"]
-    assert any(f["key"] == "mode" and f["comment"] == "режим" for f in fields)
+    assert any(f["key"] == "mode" and f["comment"].startswith("fast: ") for f in fields)
     new_root = tmp_path / "other"
     r = b.handle({"id": 2, "op": "settings_set", "updates": [
         {"section": "pipeline", "key": "mode", "value": "cascade"},
