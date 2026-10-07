@@ -24,6 +24,7 @@ uv run techbookocr skip|retry <book>                      # skip / return to the
 uv run techbookocr priority <book> <n>                    # priority: higher goes earlier in the queue
 uv run techbookocr tui                                    # techbookocr-tui panel (OpenTUI); build: cd panel && bun install && bun run build
 uv run techbookocr summarize <book> | --all              # AI summary -> description/keywords in the MOC + books-index.md
+uv run techbookocr fixes <book>                           # misprint fixes: list, --revert/--apply/--keep
 uv run --with markdown python eval/md2html.py out/*/book  # book.md -> book.html for viewing
 ```
 
@@ -41,9 +42,9 @@ Stages run over the whole book, one after another, each with its own model: `lay
 - **postproc**: running headers/footers, hyphenation, paragraph stitching across pages, table continuations, footnotes, dictionary statistics.
 - **assemble**: `book.md` (with frontmatter), `<Name>.md` (MOC table of contents), `meta.json`, `quality.md`.
 
-Library flow: `techbookocr add` -> `library.sqlite` (queue) -> `techbookocr daemon` (one book at a time through the same `run_book`, resumable) -> `techbookocr tui` -> the binary `panel/dist/techbookocr-tui` (Bun + OpenTUI); data and commands go through `techbookocr bridge` (JSON lines, protocol v1, `tui/bridge.py`). The panel reads statuses and writes commands; it works with a dead daemon, and quitting with `q` does not stop the daemon.
+Library flow: `techbookocr add` -> `library.sqlite` (queue) -> `techbookocr daemon` (one book at a time through the same `run_book`, resumable) -> `techbookocr tui` -> the binary `panel/dist/techbookocr-tui` (Bun + OpenTUI); data and commands go through `techbookocr bridge` (JSON lines, protocol v1, `tui/bridge.py`; misprint fixes use the `fixes`/`fix_set`/`fix_keep` operations and the Fixes screen). The panel reads statuses and writes commands; it works with a dead daemon, and quitting with `q` does not stop the daemon.
 
-Code: `src/techbookocr/` has `ingest/` (djvu rendering via ctypes and libdjvulibre, pdf via PyMuPDF), `models/` (adapters and docker container launch), `pipeline/` (stages, state, assembly, `control.py` for daemon commands between model requests), `library.py` (book queue in `library.sqlite`), `daemon.py` (queue loop, lock, heartbeat), `tui/` (Python side of the panel: `bridge.py` bridge, `actions.py` actions, `snapshot.py` snapshots, `data.py` read-only probes of `state.sqlite`, `settings_io.py` toml editing; the panel itself is in `panel/`, OpenTUI), `obsidian.py` (frontmatter and MOC table of contents), `eval/` (metrics and reports).
+Code: `src/techbookocr/` has `ingest/` (djvu rendering via ctypes and libdjvulibre, pdf via PyMuPDF), `models/` (adapters and docker container launch), `pipeline/` (stages, state, assembly, `control.py` for daemon commands between model requests), `library.py` (book queue in `library.sqlite`), `daemon.py` (queue loop, lock, heartbeat), `tui/` (Python side of the panel: `bridge.py` bridge, `actions.py` actions, `snapshot.py` snapshots, `data.py` read-only probes of `state.sqlite`, `settings_io.py` toml editing; the panel itself is in `panel/`, OpenTUI), `fixes/` (the `fixes.json` fix journal, toggling a fix in `book.md`, the `rejected-fixes.json` list of rejected pairs), `obsidian.py` (frontmatter and MOC table of contents), `eval/` (metrics and reports).
 
 **Modes.** `fast`: dots plus the arbiter on tables and "whole page" blocks (layout failure); text and formulas come from draft A. `cascade`: full, with draft B. The default is `fast`, set in `techbookocr.toml`, key `[pipeline] mode`. The decision was based on the cascade evaluation: same quality, 2.5 times faster (see `eval/cascade-report.md`).
 
@@ -57,7 +58,7 @@ Code: `src/techbookocr/` has `ingest/` (djvu rendering via ctypes and libdjvulib
 - **A book must not fail as a whole** because of one block: a failed block falls back to the best draft and is listed in `quality.md`.
 - **Text is never lost.** If something could not be placed (for example a sketch in a cell), it is output nearby and noted in `quality.md`.
 - **Quality over speed**, but a library run takes weeks, so hangs and silent data loss are unacceptable.
-- **Book misprints are corrected** (broken glyphs, obvious errors), and each one is recorded in `quality.md` as "was -> became". Typography (a hyphen instead of a dash) is not a misprint. Arbiter edits pass a deterministic check (`sanitize_fixes` in `pipeline/arbiter.py`): edits of digits and values, doubled operators, text deletion, table value shifts and replacing a term with an ordinary word are rejected and reverted to the printed form, and the report marks them `reverted: <reason>`.
+- **Book misprints are corrected** (broken glyphs, obvious errors), and each one is recorded in `quality.md` as "was -> became". Typography (a hyphen instead of a dash) is not a misprint. Arbiter edits pass a deterministic check (`sanitize_fixes` in `pipeline/arbiter.py`): edits of digits and values, doubled, lost or replaced operators (`t/mm -> t mm`), deletion of text or of a number's digit index (`5.0<sub>2</sub> -> 5.0`), table value shifts, replacing a term with an ordinary word, HTML escaping (`& -> &amp;`), a Latin element symbol rewritten in Cyrillic look-alike letters (`Mo`), replacing one Latin letter with another and replacing a dictionary word with another word (key `[pipeline] fix_reject_dictionary_words`) are rejected and reverted to the printed form, and the report marks them `reverted: <reason>`.
 
 ## Gotchas
 
@@ -68,7 +69,7 @@ Code: `src/techbookocr/` has `ingest/` (djvu rendering via ctypes and libdjvulib
 
 ## Copying into Obsidian
 
-`out/<book>/` is a self-contained piece of a vault. Copy: `book.md` (with frontmatter), `<Name>.md` (MOC table of contents; if the book name is `book`/`quality`, it is `<Name>-contents.md`), `images/`, the root `books-index.md`; optionally `quality.md`. Do not copy: `work/`, `meta.json`, and at the library root `library.sqlite`, `daemon.lock`, `daemon.log`. Summaries (`description`/`keywords` in the MOC) are generated by `techbookocr summarize` or the daemon (`auto_summarize`).
+`out/<book>/` is a self-contained piece of a vault. Copy: `book.md` (with frontmatter), `<Name>.md` (MOC table of contents; if the book name is `book`/`quality`, it is `<Name>-contents.md`), `images/`, the root `books-index.md`; optionally `quality.md`. Do not copy: `work/`, `meta.json`, `fixes.json`, and at the library root `library.sqlite`, `daemon.lock`, `daemon.log`, `rejected-fixes.json`. Summaries (`description`/`keywords` in the MOC) are generated by `techbookocr summarize` or the daemon (`auto_summarize`).
 
 ## Project state (October 2026)
 
@@ -79,6 +80,7 @@ Code: `src/techbookocr/` has `ingest/` (djvu rendering via ctypes and libdjvulib
 - Obsidian-compatible output: `book.md` with frontmatter and a MOC note `<Name>.md`.
 - Book summaries (no entity graph): `techbookocr summarize` writes `description`/`keywords` into the MOC and `summary` into meta.json, and builds `out/books-index.md`; the daemon summarizes after every book (`[library] auto_summarize`, model `[pipeline] summarizer_model`). A domain entity graph is postponed.
 - OpenTUI panel: `techbookocr tui` launches the binary `panel/dist/techbookocr-tui` (Bun + OpenTUI, build with `cd panel && bun run build`), which talks to the core through `techbookocr bridge`. Screens Queue / Book / Telemetry / Settings; keys are in `panel/README.md` and `docs/guide.md`. The earlier Textual panel was removed.
+- Misprint fixes: more `sanitize_fixes` rules (HTML escaping, operators, number indexes, element symbols in Cyrillic, single Latin letters, dictionary word replacement) and fix review: the Fixes screen in the panel, `techbookocr fixes`, the journal `out/<book>/fixes.json`; manual reverts in `out/rejected-fixes.json` apply to later books.
 - The project was renamed from `bookocr` to `techbookocr` throughout (package, CLI, config `techbookocr.toml`, containers `techbookocr-*`, dictionary cache `~/.cache/techbookocr/hunspell`, panel `techbookocr-tui`, variables `TECHBOOKOCR_TUI`/`TECHBOOKOCR_CMD`). Data formats (`library.sqlite`, `state.sqlite`, `out/<book>/`, `meta.json`) did not change.
 
 Documents: the operations guide is `docs/guide.md`; model decisions are in `eval/recommendation.md`, golden-set metrics in `eval/cascade-report.md`, and **unresolved recognition problems are in `docs/known-issues.md`** (the main one: a value shared by several columns is attributed to a single column).

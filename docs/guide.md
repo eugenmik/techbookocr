@@ -32,6 +32,7 @@ uv run techbookocr skip <name>                      # drop a book (queued -> ski
 uv run techbookocr retry <name>                     # return failed/skipped to the queue
 uv run techbookocr priority <name> <number>         # higher means earlier in the queue (default 0)
 uv run techbookocr summarize <name> [--all] [--redo] # model-written book summary -> preview in MOC + library index
+uv run techbookocr fixes <book> [--revert ID | --apply ID | --keep ID]   # misprint fixes: list, revert, apply, keep (one action at a time)
 ```
 
 `techbookocr summarize` appends the `description`/`keywords` fields and a preview paragraph to `<Name>.md`, a `summary` block to `meta.json`, and rebuilds `out/books-index.md`, the root note with one line per book. The daemon does this itself after each assembled book (`[library] auto_summarize`); for books recognized earlier, use `summarize --all`. The model is `[pipeline] summarizer_model`, by default the same local qwen9b as the arbiter.
@@ -55,7 +56,11 @@ Book status is an icon plus a word: `▸ processing`, `· queued`, `✓ done`, `
 
 **Queue** is a table of books (mark `●`, name, status, stage/progress, priority `p<n>`, error); on the right is a card for the selected book (stages, quality, error); at the bottom are the latest library events. The selection follows the book across refreshes, and so do the marks.
 
-**Book** (`Enter` on Queue or `2`) shows stages on the left with time, sec/page and ETA, and the list of problems; on the right is the book's `quality.md` as scrollable markdown. `Tab` switches the column, `o` opens the book's folder, `Esc` goes back.
+**Book** (`Enter` on Queue or `2`) shows stages on the left with time, sec/page and ETA, and the list of problems; on the right is the book's `quality.md` as scrollable markdown. `Tab` switches the column, `o` opens the book's folder, `f` opens the Fixes screen, `Esc` goes back.
+
+**Fixes** (`f` on Queue or Book) lists the arbiter's misprint fixes from `quality.md`, one line each with an icon: `✓` applied, `↶` reverted to the printed text (by a rule or by hand), `?` doubtful (the dictionary rule; waiting for a decision), `·` not found in `book.md`. The context of the fix from `book.md` is shown below the list. Keys: `Space` toggles "now ⇄ was" directly in `book.md`, `Enter` keeps the fix as it is and clears the `?`, `n` jumps to the next fix to review, `/` cycles the filter, `PgUp`/`PgDn` move by 10 lines, `Esc` goes back. A manual revert is recorded in `out/rejected-fixes.json`, and the same fix (the "was → now" pair) is reverted automatically in later books. An older book (without `fixes.json`) is brought up to the current checking rules when it is first opened, either on the Fixes screen or with a plain `techbookocr fixes <book>`: fixes rejected by the unambiguous rules (values, operators, element symbols and so on) and the pairs in `rejected-fixes.json` are reverted in `book.md` to the printed text; the dictionary rule only sets `?` and leaves the text alone. A fix whose place in `book.md` cannot be found unambiguously, and an insertion or deletion of text (an empty "was" or "now"), gets `·` and cannot be toggled. While the book is in progress (`processing`), the journal is read-only (`techbookocr fixes` prints the list marked `read-only` and writes nothing).
+
+Rebuilding a reviewed book (`run --keep-work --redo postproc` or `--redo assemble`, `run --models`) assembles `book.md` again from the `work/` state, and manual reverts made on the Fixes screen are lost. The pairs stay in `rejected-fixes.json` and apply to books that pass the arbiter after the revert.
 
 **Telemetry** (`3`) shows GPU charts (memory, utilization) and throughput since the panel was opened, the model in the container, and the tail of `daemon.log` (`PgUp`/`PgDn`).
 
@@ -87,9 +92,10 @@ Hotkeys also work on the Russian JCUKEN layout (same physical keys). `Ctrl+C` ex
 | Where | Keys |
 |---|---|
 | Everywhere | `1–4` screens · `?` help (scrollable) · `q` quit (the daemon keeps running) · `Ctrl+C` quit |
-| Queue | `↑↓`/`j k` move · `Space` mark · `c` clear marks · `Enter` → Book · `a` add · `x` run · `s` skip · `r` retry · `+`/`-` priority · `/` filter |
+| Queue | `↑↓`/`j k` move · `Space` mark · `c` clear marks · `Enter` → Book · `a` add · `x` run · `s` skip · `r` retry · `+`/`-` priority · `/` filter · `f` misprint fixes |
 | Daemon (Queue, Book, Telemetry) | `d` start · `p` pause/resume (takes effect between model requests) · `t` stop (with `y`/`n` confirmation; a book in progress returns to the queue and stays resumable) |
-| Book | `Tab` column · `o` folder · `r`/`s` · `Esc` back |
+| Book | `Tab` column · `o` folder · `r`/`s` · `f` misprint fixes · `Esc` back |
+| Fixes | `↑↓`/`j k` move · `PgUp`/`PgDn` page · `Space` now ⇄ was · `Enter` keep (clear `?`) · `n` next to review · `/` filter · `Esc` back |
 | Settings | `↑↓` field · `←→` value · `Enter` edit · `Ctrl+S` save · `e` $EDITOR · `Esc` discard |
 | Add books | `↑↓` move · `Space` mark a file or folder · `Enter` on a directory enters it, on a file adds the marked items (or the current file) · `a` adds the marked items (or the entry under the cursor, file or folder), whatever is under the cursor · `Backspace` up (the cursor lands on the folder you came from) · `Esc` cancel |
 
@@ -121,13 +127,16 @@ out/<book>/
   book.md          # text with frontmatter, HTML tables, LaTeX, figures, footnotes, page anchors
   <Name>.md        # MOC table of contents with links to headings (for books named "book"/"quality": <Name>-contents.md)
   images/          # cropped figures (WebP, quality is [pipeline] webp_quality, default 70)
+  fixes.json       # misprint fix journal (the Fixes screen)
   quality.md       # what was corrected and what failed: typo fixes, failed blocks
   meta.json        # metadata and statistics (machine-readable source)
   work/            # state.sqlite, frames, crops: only while the book is in progress; deleted after assembly
 out/library.sqlite, daemon.lock, daemon.log, library_report.md, books-index.md
+out/rejected-fixes.json   # "was → now" pairs reverted by hand; applied to all books
 ```
 
 - **A book does not fail as a whole** because of one block: a failed block falls back to the draft and is noted in `quality.md`.
+- **Misprint fixes are checked** before they reach the book: fixes of values, operators, number indexes, element symbols, single Latin letters and the replacement of a dictionary word with another word are reverted to the printed text and appear in `quality.md` as `reverted: <reason>`. Pairs reverted by hand on the Fixes screen (`out/rejected-fixes.json`) are checked first and reverted with the reason `rejected by user`. The dictionary-word rule is turned off with `[pipeline] fix_reject_dictionary_words = false`.
 - **A failed book** does not bring the daemon down; it moves on to the next one. A breakdown of all failed books is in `out/library_report.md`. After fixing the cause, run `retry`.
 - **A model connection failure** (the server went down) does not corrupt the book: the stage is aborted and the book stays resumable; a restart continues from where it left off.
 - `daemon.log` is the stdout/stderr of a daemon started from the panel; `daemon.lock` indicates that the daemon is alive.
@@ -135,6 +144,6 @@ out/library.sqlite, daemon.lock, daemon.log, library_report.md, books-index.md
 ## Moving to Obsidian
 
 Copy into the vault: `book.md`, `<Name>.md`, `images/`, the root `books-index.md`; optionally `quality.md`.
-Do not copy: `work/`, `meta.json`, the service files in the `out/` root (`library.sqlite`, `daemon.lock`, `daemon.log`).
+Do not copy: `work/`, `meta.json`, `fixes.json`, the service files in the `out/` root (`library.sqlite`, `daemon.lock`, `daemon.log`, `rejected-fixes.json`).
 
 In the vault a book looks like a note `<Name>` with a summary preview and a table of contents linking to the chapters of `book.md`; `books-index.md` is the entry point with a list of all books and descriptions. The frontmatter (`type: book-source`, `title`, `lang`, `pages`, `tags`, `description`, `keywords`) is visible in the properties panel; `author`/`year` and topic tags are filled in there by hand. Searching the vault finds a book by terms from `keywords`/`description`.
