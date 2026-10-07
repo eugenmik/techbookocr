@@ -43,6 +43,8 @@ dict_dir = "~/.cache/techbookocr/hunspell"
 span_single_value = false   # one-value row -> colspan: disabled by measurement, see eval/table-spans.md (12/15 < 13/15)
 span_geometry = true        # colspan and dashes from ruling-line geometry: enabled by measurement, see eval/table-spans.md (5/5 correct)
 column_rule_min_ink = 0.6   # fraction of the crop height that must be ink for a pixel column/row to count as a ruling line
+fix_reject_dictionary_words = true  # an arbiter fix that replaces a dictionary word with another word is reverted
+fix_dictionary_min_len = 4   # shorter words (unit abbreviations such as pcs, mm, kg) are not checked by this rule
 
 mode = "fast"
 [models.dots_mocr]

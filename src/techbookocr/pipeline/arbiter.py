@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import html
 import json
 import re
 from collections import Counter
@@ -248,6 +249,8 @@ _DASHES = str.maketrans({"–": "-", "—": "-", "−": "-"})
 _SUPSUB = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉", "01234567890123456789")
 _TERM = re.compile(r"^[A-Za-zА-Яа-яЁё]{5,}$")
 _OPS = "×÷·=±"  # without +: "Ca++", "Mg++" is a legitimate notation for divalent cations
+_HTML_TAG = re.compile(r"</?[A-Za-z][^<>]*>")  # a real tag: "t < 5 and p > 3" is not a tag
+_REL_OPS = "/×÷·=±<>≤≥%+"  # signs whose loss or replacement changes the meaning: t/mm → t mm, ≥150 → >150
 
 
 _CONFUSE = str.maketrans({"O": "0", "o": "0", "О": "0", "о": "0", "l": "1", "I": "1", "і": "1", "З": "3",
@@ -283,6 +286,39 @@ def _confuse(s: str) -> str:
     return _TAG.sub("", s).translate(_SUPSUB).translate(_CONFUSE)
 
 
+_NUM_INDEX = re.compile(r"\d(?:<(sub|sup)>[-−+]?\d+</\1>|[₀-₉⁰-⁹]+)")  # an index right after a digit: 5.0₂, 10⁻⁶
+
+
+def _num_indexes(s: str) -> int:
+    """Number of digit indexes attached to a number: in Mills "5.0<sub>2</sub>" marks an uncertain digit,
+    "10<sup>-6</sup>" is an exponent; both are part of the value. An index after a letter or symbol (№₂) does not count."""
+    return len(_NUM_INDEX.findall(s.replace("⁻", "")))
+
+
+_ELEMENTS = frozenset(
+    "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr "
+    "Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir "
+    "Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu".split())
+_CYR_LAT = str.maketrans("АВЕКМНОРСТХаеорсух", "ABEKMHOPCTXaeopcyx")  # Cyrillic letters indistinguishable in print
+_LETTER = "A-Za-zА-Яа-яЁё"
+_ELEMENT_TOKEN = re.compile(rf"(?<![{_LETTER}])[A-Z][a-z]?(?![{_LETTER}])")
+_PCT_ELEMENT = re.compile(r"%\s*([A-Z])(?![A-Za-zА-Яа-яЁё])")
+
+
+def _elements(s: str) -> int:
+    """Latin element symbols in the text: two-letter ones as a separate token (Mo, Ba), one-letter ones only
+    after "%" (0,3% C): a lone C/B/S is more often a code or a letter (grade codes like 4509C). Indexes do not
+    count (σ<sub>B</sub>)."""
+    s = _SS_TAG.sub(" ", s)
+    two = sum(1 for t in _ELEMENT_TOKEN.findall(s) if len(t) == 2 and t in _ELEMENTS)
+    return two + sum(1 for t in _PCT_ELEMENT.findall(s) if t in _ELEMENTS)
+
+
+def _ops(s: str) -> Counter:
+    """Operators in the text without markup (literal < and > after stripping tags and entities)."""
+    return Counter(c for c in html.unescape(_HTML_TAG.sub("", s)) if c in _REL_OPS)
+
+
 def _same_number(was: str, now: str) -> bool:
     """"0.1052" and ".1052" (also "0,15" and ",15") are one number, the difference is only the leading zero: typography."""
     num = re.compile(r"0?[.,]\d+")
@@ -297,17 +333,78 @@ def _token_re(now: str) -> re.Pattern:
     return re.compile(pre + re.escape(now) + post)
 
 
+def _replaces_word(was: str, now: str, speller, min_len: int) -> bool:
+    """A dictionary word in "was" is replaced by another word (a correct word turned into a non-word, or
+    "largest" into "smallest"): that is a change of word, not a broken glyph. Words are compared in order;
+    a different word count or a change of case does not count."""
+    if speller is None:
+        return False
+    ww, nw = _words(was), _words(now)
+    if len(ww) != len(nw):
+        return False
+    return any(a.lower() != b.lower() and len(a) >= min_len and speller.known(a)
+               for a, b in zip(ww, nw))
+
+
+def fix_reason(was: str, now: str, *, speller=None, dict_min_len: int = 4,
+               denied: frozenset[tuple[str, str]] = frozenset(),
+               chained: frozenset[str] | set[str] = frozenset(),
+               corpus: dict[str, int] | None = None) -> str | None:
+    """The reason to reject the fix "was → now", or None. Shared by the arbiter (sanitize_fixes) and the fix
+    journal of a finished book (techbookocr.fixes). chained and corpus are the context of the arbiter's
+    answer: without them the "shifts value" and "normalizes term" checks are not run. A pair from denied
+    (reverted by the user) is rejected first."""
+    if was == now or _same_number(was, now):
+        return None
+    if (was, now) in denied:
+        return "rejected by user"
+    if was.strip() and not now.strip():
+        return "deletes text"
+    if html.unescape(was) == html.unescape(now):
+        return "escapes markup"
+    if _digit_seq(was) != _digit_seq(now) and _confuse(was) != _confuse(now):
+        return "changes digits"
+    if any(now.count(op * 2) > was.count(op * 2) for op in _OPS):
+        return "doubles operator"
+    if _ops(was) - _ops(now):
+        return "changes operator"
+    if _num_indexes(now) < _num_indexes(was):
+        return "deletes index"
+    if now.translate(_CYR_LAT) == was.translate(_CYR_LAT) and _elements(now) < _elements(was):
+        return "element to Cyrillic"
+    if all(re.fullmatch(r"[A-Za-z]", _plain(x)) for x in (was, now)):
+        return "ambiguous single letter"
+    if _plain(now) and _plain(now) != _plain(was) and _plain(now) in _plain(was):
+        return "deletes span"
+    if (re.search(r"\b([A-Za-zА-Яа-яЁё]{3,}),\s*\1\b", now)
+            and not re.search(r"\b([A-Za-zА-Яа-яЁё]{3,}),\s*\1\b", was)):
+        return "duplicates word"
+    if any((m.group(0).replace("-", "") in was and m.group(0) not in was)
+           for m in re.finditer(r"[A-Za-zА-Яа-яЁё]{2,}-[A-Za-zА-Яа-яЁё]{2,}", now)):
+        return "keeps line-break hyphen"
+    if was in chained or now in chained:
+        return "shifts value"
+    if (corpus and _TERM.match(was) and _TERM.match(now.rstrip(".,:;"))
+            and Levenshtein.distance(was.lower(), now.lower().rstrip(".,:;")) <= 2
+            and corpus.get(was.lower(), 0) >= 2):
+        return "normalizes term"
+    if _replaces_word(was, now, speller, dict_min_len):
+        return "replaces dictionary word"
+    return None
+
+
 def sanitize_fixes(answer: str, fixes: list[dict], corpus: dict[str, int],
-                   drafts: list[str] | None = None) -> tuple[str, list[dict], list[dict]]:
+                   drafts: list[str] | None = None, *, speller=None, dict_min_len: int = 4,
+                   denied: frozenset[tuple[str, str]] = frozenset()) -> tuple[str, list[dict], list[dict]]:
     """Reject "typo fixes" that damage correct text; roll them back in answer.
 
-    Girshovich showed the classes of harmful fixes: substitution of full-height digits/values (1/3→1/8),
-    operator doubling (×→×× — in the original the sign is duplicated at a line break, in clean
-    text the normal form is needed), text deletion, a table value shift (now_i = was_j),
-    replacing a rare term with a common word (a rare Russian word → a similar common one), word doubling (word→word, word),
-    a hyphenation glyph left inside a word (a hyphenated ending joined with a stray hyphen). The printed text
-    is restored, the fix goes to the report marked rejected. Rollback only if "was"
-    is in the drafts (i.e. it really is printed text)."""
+    The reasons come from fix_reason: substitution of full-height digits (1/3 → 1/8), doubling, loss or
+    replacement of an operator (×→××, t/mm → t mm), deletion of text or of a number's index
+    (5.0<sub>2</sub> → 5.0), HTML escaping (& → &amp;), an element symbol rewritten in Cyrillic (Mo → Cyrillic
+    look-alikes), a single Latin letter (l → t), word doubling, a hyphenation glyph, a table value shift,
+    replacing a rare term with a common word and replacing a dictionary word (when a speller is given),
+    a pair from the user's list (denied). The printed text is restored, the fix goes to the report marked
+    rejected. Rollback only if "was" is in the drafts (i.e. it really is printed text)."""
     fixes = [f for f in fixes if not _same_number(str(f.get("was", "")), str(f.get("now", "")))]
     rejected: list[dict] = []
     rejected_ids: set[int] = set()
@@ -315,29 +412,8 @@ def sanitize_fixes(answer: str, fixes: list[dict], corpus: dict[str, int],
     chained = {str(f.get("now", "")) for f in real} & {str(f.get("was", "")) for f in real}
     for i, f in enumerate(fixes):
         was, now = str(f.get("was", "")), str(f.get("now", ""))
-        reason = None
-        if was == now:
-            continue
-        if was.strip() and not now.strip():
-            reason = "deletes text"
-        elif _digit_seq(was) != _digit_seq(now) and _confuse(was) != _confuse(now):
-            reason = "changes digits"
-        elif any(now.count(op * 2) > was.count(op * 2) for op in _OPS):
-            reason = "doubles operator"
-        elif _plain(now) and _plain(now) != _plain(was) and _plain(now) in _plain(was):
-            reason = "deletes span"
-        elif (re.search(r"\b([A-Za-zА-Яа-яЁё]{3,}),\s*\1\b", now)
-              and not re.search(r"\b([A-Za-zА-Яа-яЁё]{3,}),\s*\1\b", was)):
-            reason = "duplicates word"
-        elif any((m.group(0).replace("-", "") in was and m.group(0) not in was)
-                 for m in re.finditer(r"[A-Za-zА-Яа-яЁё]{2,}-[A-Za-zА-Яа-яЁё]{2,}", now)):
-            reason = "keeps line-break hyphen"
-        elif was in chained or now in chained:
-            reason = "shifts value"
-        elif (_TERM.match(was) and _TERM.match(now.rstrip(".,:;"))
-              and Levenshtein.distance(was.lower(), now.lower().rstrip(".,:;")) <= 2
-              and corpus.get(was.lower(), 0) >= 2):
-            reason = "normalizes term"
+        reason = fix_reason(was, now, speller=speller, dict_min_len=dict_min_len, denied=denied,
+                            chained=chained, corpus=corpus)
         if reason:
             rejected_ids.add(i)
             rejected.append({**f, "rejected": reason})
@@ -415,8 +491,13 @@ def arbiter_max_tokens(drafts: list[str], cap: int = 8192) -> int:
 
 
 def run_arbiter(state: BookState, vlm: PromptVLM, work_dir: Path, cfg, lang: str, guard: TransportGuard,
-                log: Callable[[str], None] = _noop) -> int:
-    """Arbitrate all blocks with status pending. cfg is PipelineConfig (tau_halluc and crop parameters)."""
+                log: Callable[[str], None] = _noop, speller=None,
+                denied: frozenset[tuple[str, str]] = frozenset()) -> int:
+    """Arbitrate all blocks with status pending. cfg is PipelineConfig (tau_halluc and crop parameters);
+    speller is the dictionary for the "replaces dictionary word" rule (with cfg.fix_reject_dictionary_words);
+    denied holds the pairs the user reverted (out/rejected-fixes.json)."""
+    if not getattr(cfg, "fix_reject_dictionary_words", False):
+        speller = None
     pending = state.pending_blocks("arbiter")
     images = PageImages(work_dir, {p.name: p.file for p in state.pages()})
     with_image = bool(getattr(vlm, "vision", True))
@@ -460,7 +541,8 @@ def run_arbiter(state: BookState, vlm: PromptVLM, work_dir: Path, cfg, lang: str
             try:
                 answer, fixes, pnote = parse_answer_full(res.text, blk.kind, drafts)
                 if fixes:
-                    answer, ok_fixes, bad = sanitize_fixes(answer, fixes, corpus, drafts)
+                    answer, ok_fixes, bad = sanitize_fixes(answer, fixes, corpus, drafts, speller=speller,
+                                                           dict_min_len=cfg.fix_dictionary_min_len, denied=denied)
                     fixes = ok_fixes + bad
             except ValueError as e:
                 error = f"{ERR_PARSE}: {e}"

@@ -71,6 +71,8 @@ class PipelineConfig:
     span_single_value: bool = False        # row with a single value -> colspan (measured 12/15 < 13/15, eval/table-spans.md)
     span_geometry: bool = False            # colspan/dashes from ruling-line geometry on the crop (measurement: eval/table-spans.md)
     column_rule_min_ink: float = 0.6       # share of crop height/width covered by ink for a line to count as a rule
+    fix_reject_dictionary_words: bool = True  # an arbiter fix that replaces a dictionary word with another word is reverted
+    fix_dictionary_min_len: int = 4        # shorter words are outside this rule (unit abbreviations: pcs, mm, kg)
 
 
 @dataclass(frozen=True)

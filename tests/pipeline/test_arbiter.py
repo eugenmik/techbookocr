@@ -265,12 +265,27 @@ def test_sanitize_fixes_reverts_rare_term_only_with_corpus():
 
 
 def test_sanitize_fixes_keeps_real_misprint_and_script_fix():
-    """Real misprints and Cyrillic/Latin normalization pass: a typo in a word, Latin Mo -> Cyrillic Mo."""
+    """Real misprints and normalizing an element symbol to Latin pass: a typo in a word, Cyrillic Mo -> Latin Mo."""
     from techbookocr.pipeline.arbiter import sanitize_fixes
-    answer = "молотковый порошок, 10% Мо"
-    fixes = [{"was": "перошок", "now": "порошок"}, {"was": "10% Mo", "now": "10% Мо"}]
+    answer = "молотковый порошок, 10% Mo"
+    fixes = [{"was": "перошок", "now": "порошок"}, {"was": "10% Мо", "now": "10% Mo"}]
     text, kept, rejected = sanitize_fixes(answer, fixes, {})
     assert text == answer and kept == fixes and rejected == []
+
+
+def test_sanitize_fixes_reverts_element_symbol_to_cyrillic():
+    """Girshovich, pp. 243 and 255: "10% Mo" -> "10% Mo" and "15% Ba" -> "15% Ba" with Cyrillic look-alike letters:
+    the Latin element symbol is rewritten in Cyrillic; the print looks the same, but a search for "Mo" no longer finds it."""
+    from techbookocr.pipeline.arbiter import sanitize_fixes
+    fixes = [{"was": "10% Mo", "now": "10% Мо"}, {"was": "15% Ba", "now": "15% Ва"}, {"was": "0,3% C", "now": "0,3% С"}]
+    d = ["10% Mo, 15% Ba, 0,3% C"]
+    text, kept, rej = sanitize_fixes("10% Мо, 15% Ва, 0,3% С", fixes, {}, d)
+    assert kept == [] and [r["rejected"] for r in rej] == ["element to Cyrillic"] * 3 and text == d[0]
+    # not an element: a Russian index sigma-v, an item letter (2a), Soviet grade codes with Cyrillic letters
+    ok = [{"was": "σ<sub>B</sub>", "now": "σ<sub>В</sub>"}, {"was": "(2a)", "now": "(2а)"},
+          {"was": "4509C", "now": "4509С"}, {"was": "CM50", "now": "СМ50"}]
+    _, kept, rej = sanitize_fixes("σ<sub>В</sub> (2а) 4509С СМ50", ok, {}, ["σ<sub>B</sub> (2a) 4509C CM50"])
+    assert rej == [] and kept == ok
 
 
 def test_sanitize_fixes_reverts_deletion_span():
@@ -376,3 +391,134 @@ def test_sanitize_fixes_drops_leading_zero_typography():
     bad = [{"was": "0.1052", "now": "0.1062"}]
     text, _, rej = sanitize_fixes("<td>0.1062</td>", bad, {}, ["<td>0.1052</td>"])
     assert len(rej) == 1 and text == "<td>0.1052</td>"
+
+
+def test_sanitize_fixes_reverts_markup_escaping():
+    """Cantor, p. 0007: "London & Scandinavian" -> "London &amp; Scandinavian" is HTML escaping, not a misprint."""
+    from techbookocr.pipeline.arbiter import sanitize_fixes
+    fixes = [{"was": "London & Scandinavian Metallurgical", "now": "London &amp; Scandinavian Metallurgical"}]
+    d = ["London & Scandinavian Metallurgical Co."]
+    text, kept, rej = sanitize_fixes("London &amp; Scandinavian Metallurgical Co.", fixes, {}, d)
+    assert kept == [] and [r["rejected"] for r in rej] == ["escapes markup"]
+    assert text == "London & Scandinavian Metallurgical Co."
+
+
+def test_sanitize_fixes_reverts_lost_or_changed_operator():
+    """Cantor, p. 34: "Specific load (t/mm)" -> "(t mm)" loses the "/"; Girshovich, p. 430: "≥150" -> ">150"."""
+    from techbookocr.pipeline.arbiter import sanitize_fixes
+    fixes = [{"was": "Specific load (t/mm)", "now": "Specific load (t mm)"}, {"was": "≥150", "now": ">150"}]
+    d = ["<td>Specific load (t/mm)</td><td>≥150</td>"]
+    text, kept, rej = sanitize_fixes("<td>Specific load (t mm)</td><td>>150</td>", fixes, {}, d)
+    assert kept == [] and [r["rejected"] for r in rej] == ["changes operator"] * 2
+    assert text == "<td>Specific load (t/mm)</td><td>≥150</td>"
+    # literal < and > in the text are not tags: "c > d" -> "c d" also loses an operator
+    lt = [{"was": "если a < b и c > d", "now": "если a < b и c d"}]
+    _, _, rej = sanitize_fixes("если a < b и c d", lt, {}, ["если a < b и c > d"])
+    assert [r["rejected"] for r in rej] == ["changes operator"]
+    # spaces and punctuation around operators are no reason: K min⁻¹, z = 81; m = 12
+    ok = [{"was": "Kmin<sup>-1</sup>", "now": "K min<sup>-1</sup>"}, {"was": "z = 81, m = 12 мм", "now": "z = 81; m = 12 мм"}]
+    text, kept, rej = sanitize_fixes("K min<sup>-1</sup>; z = 81; m = 12 мм", ok, {}, ["Kmin<sup>-1</sup> z = 81, m = 12 мм"])
+    assert rej == [] and kept == ok
+
+
+def test_sanitize_fixes_reverts_deleted_index_after_number():
+    """Mills, p. 112: "5.0<sub>2</sub>" -> "5.0": in Mills a subscript digit after a number marks an uncertain
+    digit, it is part of the value; an exponent "10<sup>-6</sup>" must not be lost either.
+    An index after a symbol ("№<sub>2</sub>" -> "№", correct per the Girshovich scan) remains an allowed fix."""
+    from techbookocr.pipeline.arbiter import sanitize_fixes
+    fixes = [{"was": "5.0<sub>2</sub>", "now": "5.0"}, {"was": "1.2·10<sup>-6</sup>", "now": "1.2·10"}]
+    d = ["<td>5.0<sub>2</sub></td><td>1.2·10<sup>-6</sup></td>"]
+    text, kept, rej = sanitize_fixes("<td>5.0</td><td>1.2·10</td>", fixes, {}, d)
+    assert kept == [] and [r["rejected"] for r in rej] == ["deletes index"] * 2
+    assert text == d[0]
+    ok = [{"was": "№<sub>2</sub>", "now": "№"}]
+    _, kept, rej = sanitize_fixes("кривой №", ok, {}, ["кривой №<sub>2</sub>"])
+    assert rej == [] and kept == ok
+
+
+def test_sanitize_fixes_reverts_ambiguous_single_letter():
+    """Girshovich, pp. 342 and 505: "l" -> "t", "G" -> "C" replace one Latin letter with another: this cannot be
+    checked without context, the printed form is more reliable. Cyrillic -> Greek (Pe -> Pi) and AI -> Al pass."""
+    from techbookocr.pipeline.arbiter import sanitize_fixes
+    fixes = [{"was": "l", "now": "t"}, {"was": "G", "now": "C"}]
+    d = ["$l$ = 5 мм, марка G"]
+    text, kept, rej = sanitize_fixes("$t$ = 5 мм, марка C", fixes, {}, d)
+    assert kept == [] and [r["rejected"] for r in rej] == ["ambiguous single letter"] * 2 and text == d[0]
+    ok = [{"was": "П", "now": "Π"}, {"was": "AI", "now": "Al"}]
+    _, kept, rej = sanitize_fixes("Π и Al", ok, {}, ["П и AI"])
+    assert rej == [] and kept == ok
+
+
+class _Speller:
+    def __init__(self, words):
+        self.words = {w.lower() for w in words}
+
+    def known(self, word):
+        return word.lower() in self.words
+
+
+def test_sanitize_fixes_reverts_dictionary_word_replacement():
+    """Safronov, pp. 153 and 142: a correct word turned into a non-word, and "largest" -> "smallest": a dictionary
+    word replaced by another is not a broken glyph but a change of word. A non-word fixed to a real word is a real misprint."""
+    from techbookocr.pipeline.arbiter import sanitize_fixes
+    sp = _Speller(["каток", "наибольшем", "наименьшем", "клапана", "корпус", "шт"])
+    fixes = [{"was": "Каток — 2 шт.", "now": "Кагок — 2 шт."}, {"was": "наибольшем", "now": "наименьшем"},
+             {"was": "корпус кланана", "now": "корпус клапана"}]
+    d = ["Каток — 2 шт. при наибольшем, корпус кланана"]
+    text, kept, rej = sanitize_fixes("Кагок — 2 шт. при наименьшем, корпус клапана", fixes, {}, d, speller=sp)
+    assert [r["rejected"] for r in rej] == ["replaces dictionary word"] * 2
+    assert kept == [fixes[2]] and text == "Каток — 2 шт. при наибольшем, корпус клапана"
+    # shorter than the threshold, or no dictionary: the rule stays silent
+    short = [{"was": "шт", "now": "шк"}]
+    assert sanitize_fixes("шк", short, {}, ["шт"], speller=sp)[2] == []
+    assert sanitize_fixes("наименьшем", fixes[1:2], {}, ["наибольшем"])[2] == []
+
+
+def test_run_arbiter_dictionary_rule_follows_config(tmp_path):
+    """Key [pipeline] fix_reject_dictionary_words: on, a dictionary replacement is reverted; off, it passes."""
+    sp = _Speller(["охлаждают", "затем"])
+    reply = PARA + '\nFIXES: [{"was": "охлаждают", "now": "затем"}]'
+    for on, expect in ((True, [{"was": "охлаждают", "now": "затем", "rejected": "replaces dictionary word"}]),
+                       (False, [{"was": "охлаждают", "now": "затем"}])):
+        base = tmp_path / str(on)
+        st = new_state(base, names=("0001",))
+        _disputed(st, ["0001"])
+        cfg = PipelineConfig(fix_reject_dictionary_words=on)
+        run_arbiter(st, FakeVLM(lambda p: BlockResult(reply, raw=reply)), base / "work", cfg, "ru",
+                    TransportGuard(sleep=NO_SLEEP), speller=sp)
+        assert st.blocks("0001")[0].fixes == expect
+        st.close()
+
+
+def test_fix_reason_matches_sanitize_and_denied_goes_first():
+    """fix_reason gives the same reasons as sanitize_fixes; a pair from the user's list gives "rejected by user"
+    before any other rule (Safronov: a word replaced by a non-word; Cantor: "t/mm" -> "t mm")."""
+    from techbookocr.pipeline.arbiter import fix_reason
+    assert fix_reason("Specific load (t/mm)", "Specific load (t mm)") == "changes operator"
+    assert fix_reason("10% Mo", "10% Мо") == "element to Cyrillic"
+    assert fix_reason("перошок", "порошок") is None
+    assert fix_reason("0.1052", ".1052") is None                     # a leading zero is typography
+    assert fix_reason("Каток", "Кагок") is None                       # without a dictionary the rule stays silent
+    assert fix_reason("Каток", "Кагок", denied=frozenset({("Каток", "Кагок")})) == "rejected by user"
+    assert fix_reason("400", "800", denied=frozenset({("400", "800")})) == "rejected by user"
+    assert fix_reason("КФ-40", "СФ-40", chained={"СФ-40"}) == "shifts value"
+    assert fix_reason("ужимины", "ужины", corpus={"ужимины": 3}) == "normalizes term"
+
+
+def test_sanitize_fixes_reverts_denied_pair():
+    from techbookocr.pipeline.arbiter import sanitize_fixes
+    fixes = [{"was": "Каток", "now": "Кагок"}]
+    text, kept, rej = sanitize_fixes("Кагок — 2 шт.", fixes, {}, ["Каток — 2 шт."],
+                                     denied=frozenset({("Каток", "Кагок")}))
+    assert text == "Каток — 2 шт." and kept == [] and [r["rejected"] for r in rej] == ["rejected by user"]
+
+
+def test_run_arbiter_passes_denied(tmp_path):
+    st = new_state(tmp_path, names=("0001",))
+    _disputed(st, ["0001"])
+    reply = PARA + '\nFIXES: [{"was": "охлаждают", "now": "затем"}]'
+    run_arbiter(st, FakeVLM(lambda p: BlockResult(reply, raw=reply)), tmp_path / "work",
+                PipelineConfig(fix_reject_dictionary_words=False), "ru", TransportGuard(sleep=NO_SLEEP),
+                denied=frozenset({("охлаждают", "затем")}))
+    assert st.blocks("0001")[0].fixes == [{"was": "охлаждают", "now": "затем", "rejected": "rejected by user"}]
+    st.close()
