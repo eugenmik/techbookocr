@@ -4,6 +4,7 @@ import { StatusStrip } from "../src/components/StatusStrip"
 import { ModalView } from "../src/screens/Modals"
 import { BookScreen } from "../src/screens/Book"
 import { Shell } from "../src/components/Shell"
+import { StageTable } from "../src/components/StageTable"
 import { SettingsScreen } from "../src/screens/Settings"
 import { QueueScreen, bookRowText, windowTop } from "../src/screens/Queue"
 import { createSignal } from "solid-js"
@@ -452,3 +453,19 @@ test("status strip: unknown scan counts show a dash, not a fake ≈0s", async ()
   expect(f).not.toContain("≈0s")
 }
 )
+
+test("stage table: progress of a big book fits the last column, ETA stays right-aligned", async () => {
+  const stages = [
+    { stage: "layout", status: "done" as const, seconds: 7920, s_per_page: 18.1, progress: [437, 437] as [number, number], eta_s: null },
+    { stage: "arbiter", status: "running" as const, seconds: null, s_per_page: null, progress: [3155, 31550] as [number, number], eta_s: 660 },
+  ]
+  const f = await frame(() => <StageTable stages={stages} theme={makeTheme({})} wide={false} />, 40, 6)
+  const lines = f.split("\n")
+  expect(f).toContain("3155/31550")
+  expect(f).not.toContain("…")
+  const row = lines.find((l) => l.includes("arbiter"))!
+  const head = lines.find((l) => l.includes("Stage"))!
+  const eta = lines.find((l) => l.includes("ETA"))!
+  expect(head.trimEnd().length).toBe(row.trimEnd().length)   // the s/pp header is right-aligned with the column
+  expect(eta.trimEnd().length).toBe(row.trimEnd().length)    // ETA sits under the last column
+})
