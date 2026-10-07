@@ -128,3 +128,50 @@ test("editToml: a broken toml after editing becomes an error toast, not a crash"
     expect(acts).toEqual([{ type: "toast", text: "techbookocr.toml: bad", level: "error", now: 1 }])
   })
 })
+
+test("fix commands call the bridge with a long timeout for the journal", async () => {
+  const calls: any[] = []
+  const client: any = { request: async (op: string, args: any, opts: any) => {
+    calls.push([op, args, opts])
+    if (op === "fixes") return { fixes: [], counts: { applied: 0, reverted: 0, suggested: 0, not_found: 0 }, editable: true, why_not: null }
+    return { fix: { id: "0046-1", state: "reverted" }, counts: { applied: 0, reverted: 1, suggested: 0, not_found: 0 } }
+  }, retarget() {} }
+  const ctx = { client, now: () => 0 }
+  expect((await runCommand({ kind: "loadFixes", book: "b" }, ctx))[0].type).toBe("fixesLoaded")
+  expect(calls[0]).toEqual(["fixes", { book: "b" }, { timeoutMs: 60_000 }])
+  const acts = await runCommand({ kind: "fixSet", book: "b", id: "0046-1", applied: false }, ctx)
+  expect(calls[1].slice(0, 2)).toEqual(["fix_set", { book: "b", fix: "0046-1", applied: false }])
+  expect(acts.map((a) => a.type)).toEqual(["fixUpdated", "toast"])
+  await runCommand({ kind: "fixKeep", book: "b", id: "0046-1" }, ctx)
+  expect(calls[2].slice(0, 2)).toEqual(["fix_keep", { book: "b", fix: "0046-1" }])
+  expect((await runCommand({ kind: "notify", text: "x", level: "error" }, ctx))[0]).toMatchObject({ type: "toast", text: "x", level: "error" })
+})
+
+test("a failed fixes load gives an error toast and a fixesFailed action", async () => {
+  const client: any = { request: async () => { throw new Error("bridge timeout") }, retarget() {} }
+  const acts = await runCommand({ kind: "loadFixes", book: "b" }, { client, now: () => 5 })
+  expect(acts).toEqual([{ type: "toast", text: "bridge timeout", level: "error", now: 5 },
+                        { type: "fixesFailed", book: "b", error: "bridge timeout" }])
+})
+
+test("a failed fixSet/fixKeep toasts the error and reloads the journal from the bridge", async () => {
+  const data = { fixes: [], counts: { applied: 0, reverted: 0, suggested: 0, not_found: 1 }, editable: true, why_not: null }
+  const calls: string[] = []
+  const client: any = { request: async (op: string) => {
+    calls.push(op)
+    if (op === "fixes") return data
+    throw new Error("0046-1: fix location changed")
+  }, retarget() {} }
+  for (const cmd of [{ kind: "fixSet", book: "b", id: "0046-1", applied: false } as const,
+                     { kind: "fixKeep", book: "b", id: "0046-1" } as const]) {
+    calls.length = 0
+    const acts = await runCommand(cmd, { client, now: () => 7 })
+    expect(acts).toEqual([{ type: "toast", text: "0046-1: fix location changed", level: "error", now: 7 },
+                          { type: "fixesLoaded", book: "b", data }])
+    expect(calls).toEqual([cmd.kind === "fixSet" ? "fix_set" : "fix_keep", "fixes"])
+  }
+  // the reload fails too: only the toast about the original error, the screen stays as it was
+  const dead: any = { request: async () => { throw new Error("bridge down") }, retarget() {} }
+  expect(await runCommand({ kind: "fixKeep", book: "b", id: "x" }, { client: dead, now: () => 1 }))
+    .toEqual([{ type: "toast", text: "bridge down", level: "error", now: 1 }])
+})

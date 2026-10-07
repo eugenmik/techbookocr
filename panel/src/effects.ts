@@ -3,7 +3,7 @@
 import { readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import type { BridgeLike } from "./bridge/client"
-import type { ActResult, AddResult, BookDetail, SettingsData, Snapshot } from "./bridge/types"
+import type { ActResult, AddResult, BookDetail, Fix, FixCounts, FixesData, SettingsData, Snapshot } from "./bridge/types"
 import { splitWords } from "./shell"
 import type { Action, Command, DirEntry } from "./state/store"
 
@@ -11,6 +11,8 @@ export interface EffectCtx { client: BridgeLike; now: () => number; suspend?: (f
 
 // A large add (hundreds of files, folder traversal) does not fit into the usual 10 s request timeout.
 const ADD_TIMEOUT_MS = 120_000
+// The first open of an older book's fixes builds the journal and loads the hunspell dictionary: seconds.
+const FIXES_TIMEOUT_MS = 60_000
 
 // Settings replies carry the library root: when library.dir changes, subsequent bridge launches take it as --out.
 async function settings(ctx: EffectCtx): Promise<SettingsData> {
@@ -80,11 +82,36 @@ export async function runCommand(cmd: Command, ctx: EffectCtx): Promise<Action[]
         return [{ type: "dirListed", dir: cmd.dir, entries: listDir(cmd.dir), focus: cmd.focus }]
       case "log":
         return [{ type: "log", lines: (await ctx.client.request<{ lines: string[] }>("log_tail", { lines: cmd.lines })).lines }]
+      case "loadFixes":
+        return [{ type: "fixesLoaded", book: cmd.book,
+                  data: await ctx.client.request<FixesData>("fixes", { book: cmd.book }, { timeoutMs: FIXES_TIMEOUT_MS }) }]
+      case "fixSet": {
+        const r = await ctx.client.request<{ fix: Fix; counts: FixCounts }>("fix_set", { book: cmd.book, fix: cmd.id, applied: cmd.applied })
+        return [{ type: "fixUpdated", book: cmd.book, fix: r.fix, counts: r.counts },
+                toast(cmd.applied ? `${cmd.id}: fix applied` : `${cmd.id}: printed text restored`)]
+      }
+      case "fixKeep": {
+        const r = await ctx.client.request<{ fix: Fix; counts: FixCounts }>("fix_keep", { book: cmd.book, fix: cmd.id })
+        return [{ type: "fixUpdated", book: cmd.book, fix: r.fix, counts: r.counts }]
+      }
+      case "notify":
+        return [toast(cmd.text, cmd.level)]
       case "quit":
         return []
     }
   } catch (e) {
     const msg = (e as Error).message
-    return cmd.kind === "snapshot" ? [{ type: "stale" }] : [toast(msg, "error")]
+    if (cmd.kind === "snapshot") return [{ type: "stale" }]
+    // Loading the fixes failed: the screen must not wait forever, so besides the toast it gets the error text.
+    if (cmd.kind === "loadFixes") return [toast(msg, "error"), { type: "fixesFailed", book: cmd.book, error: msg }]
+    // fix_set/fix_keep refused (the fix's place changed, the book is processing…): the bridge has already corrected the journal,
+    // so reload it to let the screen show not_found and the like. If the reload fails, only the toast remains.
+    if (cmd.kind === "fixSet" || cmd.kind === "fixKeep") {
+      try {
+        const data = await ctx.client.request<FixesData>("fixes", { book: cmd.book }, { timeoutMs: FIXES_TIMEOUT_MS })
+        return [toast(msg, "error"), { type: "fixesLoaded", book: cmd.book, data }]
+      } catch { /* bridge unavailable: the toast about the original error is enough */ }
+    }
+    return [toast(msg, "error")]
   }
 }

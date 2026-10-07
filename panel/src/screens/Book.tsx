@@ -4,6 +4,7 @@ import { bookInfoLine } from "../components/BookCard"
 import { Section } from "../components/Section"
 import { Span } from "../components/Span"
 import { StageTable } from "../components/StageTable"
+import { bookSubline } from "../fixes-view"
 import { oneLine, strWidth, truncate } from "../format"
 import { CHROME_H, GUTTER } from "../layout"
 import type { AppState } from "../state/store"
@@ -48,7 +49,8 @@ export function BookScreen(props: { state: AppState; theme: Theme }) {
           <Span fg={t.muted}>{BACK}</Span>
           <strong>{truncate(oneLine(d()!.info.name), s().size.width - 2 - strWidth(BACK))}</strong>
         </text>
-        <text fg={t.muted}>{" ".repeat(strWidth(BACK)) + bookInfoLine(d()!.info) + `  ·  added ${d()!.info.added_at.slice(0, 16).replace("T", " ")}`}</text>
+        <text fg={t.muted}>{bookSubline(" ".repeat(strWidth(BACK)), bookInfoLine(d()!.info),
+                            d()!.info.added_at.slice(0, 16).replace("T", " "), d()!.fixes, s().size.width - 2)}</text>
         <Show when={loose()}><box height={1} /></Show>
         <box flexDirection="row" flexGrow={1}>
           <box flexDirection="column" width={BOOK_LEFT_W}>

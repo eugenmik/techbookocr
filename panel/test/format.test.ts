@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { oneLine } from "../src/format"
+import { contextParts, fixColumns, fixIcon, fixSummaryLine, simplifyMarkup } from "../src/fixes-view"
 import { bar, fmtDuration, fmtGB, fmtInt, padEnd, padStart, sparkline, strWidth, truncate } from "../src/format"
 
 describe("width-aware text", () => {
@@ -45,4 +46,27 @@ describe("numbers", () => {
 test("oneLine: control chars and whitespace runs become single spaces", () => {
   expect(oneLine("Boom:\n  at x\r\n\tline")).toBe("Boom: at x line")
   expect(oneLine("  a\u0000b  ")).toBe("a b")
+})
+
+const F = { id: "0046-1", scan: "0046", page: "34", block: 3, kind: "table", was: "Specific load (t/mm)",
+  now: "Specific load (t mm)", state: "reverted" as const, suggested: false, reason: "changes operator",
+  decided_by: "rule" as const, before: "d>Roll speed (m/min)</td><td>", after: "</td></tr></thead><tr><td>5.92" }
+
+test("fix view helpers", () => {
+  expect(fixIcon(F)).toBe("↶")
+  expect(fixIcon({ ...F, state: "applied", suggested: true })).toBe("?")
+  expect(simplifyMarkup("<td>a</td><td>b<sub>2</sub></td></tr><tr><td>c<br>d</td>")).toBe("a │ b<sub>2</sub>\nc d")
+  const p = contextParts(F)
+  expect(p.before).toBe("Roll speed (m/min) │ ")                     // the tag fragment "d>" is cut off
+  expect(p.cur).toBe("Specific load (t/mm)")
+  expect(p.after).toBe("\n5.92")
+  expect([p.otherLabel, p.other]).toEqual(["now", "Specific load (t mm)"])
+  expect(fixColumns(78).reason).toBe(0)
+  expect(fixColumns(118).reason).toBeGreaterThan(0)
+  expect(fixSummaryLine({ total: 25, suggested: 3, reviewed: false })).toBe("Fixes 25 · 3 to review · f")
+  expect(fixSummaryLine({ total: 2, suggested: null, reviewed: false })).toBe("Fixes 2 · not reviewed · f")
+  expect(fixSummaryLine({ total: 0, suggested: null, reviewed: false })).toBeNull()
+  // no "?" at all: nothing to look at (not "reviewed": nobody has opened the new book yet)
+  expect(fixSummaryLine({ total: 4, suggested: 0, reviewed: true })).toBe("Fixes 4 · nothing to review · f")
+  expect(fixSummaryLine(null)).toBeNull()                          // the summary could not be read
 })

@@ -10,7 +10,7 @@ import { windowTop } from "./Queue"
 
 export const HELP_SCOPES: [Scope, string][] = [
   ["global", "Everywhere"], ["daemon", "Daemon (Queue, Book, Telemetry)"], ["queue", "Queue"], ["book", "Book"],
-  ["telemetry", "Telemetry"], ["settings", "Settings"], ["add", "Add books"],
+  ["telemetry", "Telemetry"], ["settings", "Settings"], ["fixes", "Fixes"], ["add", "Add books"],
 ]
 
 const prettyKey = (k: string) =>

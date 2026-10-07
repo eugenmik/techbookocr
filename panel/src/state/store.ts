@@ -1,12 +1,16 @@
 // Single panel state and a pure reducer: update(state, action) → { state, cmds }.
 // Commands (cmds) are executed by effects.ts; the reducer does no I/O.
 import type { BridgeStatus } from "../bridge/client"
-import type { BookDetail, FieldValue, SettingsData, Snapshot } from "../bridge/types"
+import type { BookDetail, FieldValue, Fix, FixCounts, FixesData, SettingsData, Snapshot } from "../bridge/types"
+import { settleCursor } from "./fixes"
 import { emptyHistory, pushSnapshot, type History } from "./history"
 import { handleKey } from "./keys"
 import { selectedName, visibleBooks } from "./select"
 
-export type Screen = "queue" | "book" | "telemetry" | "settings"
+export type Screen = "queue" | "book" | "telemetry" | "settings" | "fixes"
+export type FixFilter = "all" | "review" | "applied" | "reverted" | "not_found"
+export interface FixesView { book: string; data: FixesData | null; cursorId: string | null; filter: FixFilter; back: Screen
+  error?: string | null }
 export interface DirEntry { name: string; dir: boolean }
 export type ActName = "skip" | "retry" | "bump" | "run" | "daemon_start" | "daemon_toggle" | "daemon_stop"
 export type Command =
@@ -20,6 +24,10 @@ export type Command =
   | { kind: "openFolder"; path: string }
   | { kind: "listDir"; dir: string; focus?: string }
   | { kind: "log"; lines: number }
+  | { kind: "loadFixes"; book: string }
+  | { kind: "fixSet"; book: string; id: string; applied: boolean }
+  | { kind: "fixKeep"; book: string; id: string }
+  | { kind: "notify"; text: string; level: "info" | "error" }
   | { kind: "quit" }
 export type Modal =
   | null
@@ -36,6 +44,7 @@ export interface AppState {
   cursor: number; marks: string[]; filter: { active: boolean; text: string }
   bookName: string | null; book: BookDetail | null; bookPane: "stages" | "quality"
   settings: SettingsState | null
+  fixes: FixesView | null
   log: string[]; logScroll: number
   history: History
   toast: { text: string; level: "info" | "error"; until: number } | null
@@ -52,6 +61,9 @@ export type Action =
   | { type: "settingsLoaded"; data: SettingsData }
   | { type: "dirListed"; dir: string; entries: DirEntry[]; focus?: string }
   | { type: "log"; lines: string[] }
+  | { type: "fixesLoaded"; book: string; data: FixesData }
+  | { type: "fixesFailed"; book: string; error: string }
+  | { type: "fixUpdated"; book: string; fix: Fix; counts: FixCounts }
   | { type: "toast"; text: string; level: "info" | "error"; now: number }
   | { type: "resize"; width: number; height: number }
 export interface Result { state: AppState; cmds: Command[] }
@@ -70,7 +82,7 @@ export function initialState(width: number, height: number): AppState {
   return {
     screen: "queue", modal: null, bridge: { kind: "connecting" }, snap: null, stale: false, polling: false,
     cursor: 0, marks: [], filter: { active: false, text: "" },
-    bookName: null, book: null, bookPane: "stages", settings: null, log: [], logScroll: 0,
+    bookName: null, book: null, bookPane: "stages", settings: null, fixes: null, log: [], logScroll: 0,
     history: emptyHistory(), toast: null, size: { width, height },
   }
 }
@@ -120,6 +132,17 @@ export function update(s: AppState, a: Action): Result {
       return { state: { ...s, modal: { kind: "add", dir: a.dir, entries: a.entries, cursor: Math.max(0, at), marked: s.modal.marked } }, cmds: [] }
     case "log":
       return { state: { ...s, log: a.lines }, cmds: [] }
+    case "fixesLoaded":
+      if (s.fixes?.book !== a.book) return { state: s, cmds: [] }
+      return { state: { ...s, fixes: settleCursor({ ...s.fixes, data: a.data, error: null }) }, cmds: [] }
+    case "fixesFailed":
+      if (s.fixes?.book !== a.book) return { state: s, cmds: [] }
+      return { state: { ...s, fixes: { ...s.fixes, error: a.error } }, cmds: [] }
+    case "fixUpdated": {
+      if (s.fixes?.book !== a.book || !s.fixes.data) return { state: s, cmds: [] }
+      const fixes = s.fixes.data.fixes.map((f) => (f.id === a.fix.id ? a.fix : f))
+      return { state: { ...s, fixes: settleCursor({ ...s.fixes, data: { ...s.fixes.data, fixes, counts: a.counts } }) }, cmds: [] }
+    }
     case "toast":
       return { state: { ...s, toast: { text: a.text, level: a.level, until: a.now + TOAST_MS } }, cmds: [] }
     case "resize":

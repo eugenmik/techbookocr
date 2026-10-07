@@ -11,7 +11,7 @@ export function TabBar(props: { screen: Screen; theme: Theme }) {
       <span>{"  "}</span>
       <For each={TABS}>
         {([id, label]) => (
-          <Show when={props.screen === id}
+          <Show when={props.screen === id || (props.screen === "fixes" && id === "book")}
                 fallback={<Span fg={props.theme.muted}>{` ${label} `}{"   "}</Span>}>
             <Span fg={props.theme.accent}><strong>{`[${label}]`}</strong>{"   "}</Span>
           </Show>

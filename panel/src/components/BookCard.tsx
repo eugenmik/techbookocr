@@ -1,4 +1,5 @@
 import { Show } from "solid-js"
+import { fixSummaryLine } from "../fixes-view"
 import { oneLine, truncate } from "../format"
 import type { AppState } from "../state/store"
 import type { Theme } from "../theme"
@@ -30,6 +31,9 @@ export function BookCard(props: { state: AppState; theme: Theme; width: number }
             {d()!.issues.length ? `${d()!.issues.length} issue${d()!.issues.length === 1 ? "" : "s"}` : "no issues"}
           </Span>
         </text>
+        <Show when={fixSummaryLine(d()!.fixes)}>
+          <text><Span fg={d()!.fixes?.suggested ? props.theme.warn : props.theme.muted}>{fixSummaryLine(d()!.fixes)!}</Span></text>
+        </Show>
         <Show when={d()!.info.error}>
           <text><Span fg={props.theme.err}>{truncate(`✗ ${oneLine(d()!.info.error!)}`, props.width)}</Span></text>
         </Show>

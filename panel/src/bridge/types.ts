@@ -37,7 +37,17 @@ export interface BookDetail {
   issues: string[]
   quality_md: string | null
   out_dir: string
+  fixes?: FixSummary | null               // null: quality.md/fixes.json could not be read
 }
+export type FixState = "applied" | "reverted" | "not_found"
+export interface Fix {
+  id: string; scan: string; page: string | null; block: number | null; kind: string | null
+  was: string; now: string; state: FixState; suggested: boolean; reason: string | null
+  decided_by: "model" | "rule" | "user"; before: string; after: string
+}
+export interface FixCounts { applied: number; reverted: number; suggested: number; not_found: number }
+export interface FixesData { fixes: Fix[]; counts: FixCounts; editable: boolean; why_not: string | null }
+export interface FixSummary { total: number; suggested: number | null; reviewed: boolean }
 export type FieldValue = string | number | boolean | null
 export interface SettingField {
   section: string; key: string; kind: "choice" | "path" | "int" | "float" | "bool" | "model"

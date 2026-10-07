@@ -3,10 +3,11 @@
 import { basename, dirname, join } from "node:path"
 import type { FieldValue } from "../bridge/types"
 import { queueLayout } from "../layout"
+import { FILTERS, cursorIndex, nextReview, settleCursor, visibleFixes } from "./fixes"
 import { fieldId, selectedName, targets, visibleBooks } from "./select"
 import { LOG_LINES, relocate, syncSelection, type AppState, type Command, type KeyInput, type Result, type Screen } from "./store"
 
-export type Scope = "global" | "daemon" | "queue" | "book" | "telemetry" | "settings" | "help" | "add" | "confirm"
+export type Scope = "global" | "daemon" | "queue" | "book" | "telemetry" | "settings" | "fixes" | "help" | "add" | "confirm"
 export interface Binding { scope: Scope; keys: string[]; label: string; hint?: string; run: (s: AppState) => Result }
 
 const ok = (state: AppState, ...cmds: Command[]): Result => ({ state, cmds })
@@ -40,11 +41,55 @@ function bump(s: AppState, delta: number): Result {
 
 export function goScreen(s: AppState, screen: Screen): Result {
   const st = { ...s, screen, modal: null }
+  if (screen === "fixes") return openFixes(s)
   if (s.screen === screen) return ok(st)                  // already here: do not reload (the settings draft is alive)
   if (screen === "book") return st.bookName ? ok(st, { kind: "loadBook", name: st.bookName }) : ok(st)
   if (screen === "telemetry") return ok({ ...st, logScroll: 0 }, { kind: "log", lines: LOG_LINES })
   if (screen === "settings") return hasDraft(s) ? ok(st) : ok(st, { kind: "loadSettings" })   // do not overwrite the draft
   return ok(st)
+}
+
+// --- Fixes screen ---
+
+function openFixes(s: AppState): Result {
+  if (!s.bookName) return ok(s)
+  const back = s.screen === "fixes" ? (s.fixes?.back ?? "book") : s.screen
+  return ok({ ...s, screen: "fixes", modal: null, fixes: { book: s.bookName, data: null, cursorId: null, filter: "all", back } },
+            { kind: "loadFixes", book: s.bookName })
+}
+
+function fixesMove(s: AppState, d: number): Result {
+  if (!s.fixes) return ok(s)
+  const vis = visibleFixes(s.fixes)
+  if (!vis.length) return ok(s)
+  const i = Math.max(0, Math.min(vis.length - 1, cursorIndex(s.fixes) + d))
+  return ok({ ...s, fixes: { ...s.fixes, cursorId: vis[i].id } })
+}
+
+function curFix(s: AppState) {
+  return s.fixes?.data?.fixes.find((f) => f.id === s.fixes!.cursorId)
+}
+
+/** A "?" fix (applied but doubtful) was decided by a command: the cursor moves to the next "?"; if there is none, it stays. */
+function stepReview(s: AppState, cmd: Command): Result {
+  const next = nextReview(s.fixes!)
+  return ok(next && next !== s.fixes!.cursorId ? { ...s, fixes: { ...s.fixes!, cursorId: next } } : s, cmd)
+}
+
+function fixToggle(s: AppState): Result {
+  const f = curFix(s)
+  if (!s.fixes?.data || !f) return ok(s)
+  if (!s.fixes.data.editable) return ok(s, { kind: "notify", text: `read-only: ${s.fixes.data.why_not}`, level: "error" })
+  if (f.state === "not_found") return ok(s, { kind: "notify", text: `${f.id}: not found in book.md — cannot toggle`, level: "error" })
+  const cmd: Command = { kind: "fixSet", book: s.fixes.book, id: f.id, applied: f.state !== "applied" }
+  return f.state === "applied" && f.suggested ? stepReview(s, cmd) : ok(s, cmd)
+}
+
+function fixKeep(s: AppState): Result {
+  const f = curFix(s)
+  if (!s.fixes?.data || !f) return ok(s)
+  if (!s.fixes.data.editable) return ok(s, { kind: "notify", text: `read-only: ${s.fixes.data.why_not}`, level: "error" })
+  return f.suggested ? stepReview(s, { kind: "fixKeep", book: s.fixes.book, id: f.id }) : ok(s)
 }
 
 const hasDraft = (s: AppState) => Object.keys(s.settings?.draft ?? {}).length > 0
@@ -209,6 +254,23 @@ export const BINDINGS: Binding[] = [
   { scope: "book", keys: ["s"], label: "skip", hint: "s skip",
     run: (s) => (s.bookName ? ok(s, { kind: "act", action: "skip", books: [s.bookName] }) : ok(s)) },
   { scope: "book", keys: ["escape"], label: "back to queue", hint: "esc back", run: (s) => goScreen(s, "queue") },
+  { scope: "queue", keys: ["f"], label: "review misprint fixes", hint: "f fixes", run: openFixes },
+  { scope: "book", keys: ["f"], label: "review misprint fixes", hint: "f fixes", run: openFixes },
+  // Fixes
+  { scope: "fixes", keys: ["up", "k"], label: "move up", hint: "↑↓ move", run: (s) => fixesMove(s, -1) },
+  { scope: "fixes", keys: ["down", "j"], label: "move down", run: (s) => fixesMove(s, 1) },
+  { scope: "fixes", keys: ["pageup"], label: "page up", run: (s) => fixesMove(s, -10) },
+  { scope: "fixes", keys: ["pagedown"], label: "page down", run: (s) => fixesMove(s, 10) },
+  { scope: "fixes", keys: ["space"], label: "toggle fix ⇄ printed text", hint: "␣ toggle", run: fixToggle },
+  { scope: "fixes", keys: ["enter"], label: "keep as is (clear ?)", hint: "⏎ keep", run: fixKeep },
+  { scope: "fixes", keys: ["n"], label: "next fix to review", hint: "n next ?",
+    run: (s) => { const id = s.fixes ? nextReview(s.fixes) : null
+                  return id ? ok({ ...s, fixes: { ...s.fixes!, filter: "all", cursorId: id } }) : ok(s) } },
+  { scope: "fixes", keys: ["/"], label: "filter: all / to review / applied / printed / not found", hint: "/ filter",
+    run: (s) => { if (!s.fixes) return ok(s)
+                  const filter = FILTERS[(FILTERS.indexOf(s.fixes.filter) + 1) % FILTERS.length]
+                  return ok({ ...s, fixes: settleCursor({ ...s.fixes, filter }) }) } },
+  { scope: "fixes", keys: ["escape"], label: "back", hint: "esc back", run: (s) => goScreen(s, s.fixes?.back ?? "book") },
   // Telemetry
   { scope: "telemetry", keys: ["pageup"], label: "scroll log up", hint: "PgUp/PgDn log",
     run: (s) => ok({ ...s, logScroll: Math.min(Math.max(0, s.log.length - 1), s.logScroll + 10) }) },
@@ -242,7 +304,7 @@ export const BINDINGS: Binding[] = [
 
 function scopes(s: AppState): Scope[] {
   if (s.modal) return [s.modal.kind]
-  const daemon: Scope[] = s.screen === "settings" ? [] : ["daemon"]
+  const daemon: Scope[] = s.screen === "settings" || s.screen === "fixes" ? [] : ["daemon"]
   return [s.screen, ...daemon, "global"]
 }
 
@@ -283,6 +345,6 @@ export function footerHints(s: AppState): { left: string[]; right: string[] } {
   if (s.modal) return { left: hints(s.modal.kind), right: [] }
   if (s.screen === "queue" && s.filter.active) return { left: ["type to filter", "⏎ keep", "esc clear"], right: [] }
   if (s.screen === "settings" && s.settings?.editing != null) return { left: ["⏎ apply", "esc cancel"], right: [] }
-  const right = s.screen === "settings" ? [] : hints("daemon")
+  const right = s.screen === "settings" || s.screen === "fixes" ? [] : hints("daemon")
   return { left: [...hints(s.screen), ...hints("global")], right }
 }

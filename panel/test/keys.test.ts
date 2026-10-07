@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { footerHints, handleKey, keyId } from "../src/state/keys"
 import { initialState, update, type AppState, type KeyInput } from "../src/state/store"
 import { LIBRARY, snap } from "./fixtures/state"
-import type { SettingsData } from "../src/bridge/types"
+import type { Fix, FixesData, SettingsData } from "../src/bridge/types"
 
 const k = (sequence: string, name = sequence, mods: Partial<KeyInput> = {}): KeyInput =>
   ({ name, sequence, ctrl: false, shift: false, meta: false, ...mods })
@@ -302,5 +302,80 @@ describe("add books: folder under the cursor needs confirmation", () => {
     expect(press(open(), DOWN, k("a")).cmds).toEqual([{ kind: "add", paths: ["/home/u/a.djvu"] }])
     const marked = press(open(), SPACE, k("a"))                 // a folder is marked: a deliberate choice
     expect(marked.cmds).toEqual([{ kind: "add", paths: ["/home/u/lib"] }])
+  })
+})
+
+const fix = (id: string, state: Fix["state"], suggested = false): Fix => ({
+  id, scan: id.split("-")[0], page: null, block: null, kind: null, was: "a", now: "b", state, suggested,
+  reason: null, decided_by: "model", before: "", after: "" })
+const FDATA: FixesData = { fixes: [fix("0007-1", "reverted"), fix("0046-1", "applied", true), fix("0106-1", "not_found")],
+  counts: { applied: 0, reverted: 1, suggested: 1, not_found: 1 }, editable: true, why_not: null }
+
+describe("fixes", () => {
+  function opened(data: FixesData = FDATA) {
+    const { s, cmds } = press(loaded(), k("f"))
+    expect(cmds).toContainEqual({ kind: "loadFixes", book: s.bookName })
+    expect(s.screen).toBe("fixes")
+    return update(s, { type: "fixesLoaded", book: s.bookName!, data }).state
+  }
+  test("f opens Fixes for the selected book; Esc returns", () => {
+    const s = opened()
+    expect(press(s, ESC).s.screen).toBe("queue")
+    const fromBook = press(update(loaded(), { type: "key", key: ENTER }).state, k("f")).s
+    expect(press(update(fromBook, { type: "fixesLoaded", book: fromBook.bookName!, data: FDATA }).state, ESC).s.screen).toBe("book")
+  })
+  test("space toggles, enter keeps, n jumps to review, / cycles filter", () => {
+    let s = opened()
+    let r = press(s, SPACE)                                               // 0007-1 reverted → apply
+    expect(r.cmds).toEqual([{ kind: "fixSet", book: s.bookName, id: "0007-1", applied: true }])
+    r = press(s, k("n"))
+    expect(r.s.fixes!.cursorId).toBe("0046-1")
+    expect(press(r.s, SPACE).cmds).toEqual([{ kind: "fixSet", book: s.bookName, id: "0046-1", applied: false }])
+    expect(press(r.s, ENTER).cmds).toEqual([{ kind: "fixKeep", book: s.bookName, id: "0046-1" }])
+    r = press(r.s, DOWN)
+    expect(r.s.fixes!.cursorId).toBe("0106-1")
+    expect(press(r.s, SPACE).cmds[0]).toMatchObject({ kind: "notify", level: "error" })    // not_found
+    r = press(s, k("/"))
+    expect(r.s.fixes!.filter).toBe("review")
+    expect(r.s.fixes!.cursorId).toBe("0046-1")
+  })
+  test("read-only: space and enter only notify", () => {
+    const s = opened({ ...FDATA, editable: false, why_not: "book is processing" })
+    expect(press(s, SPACE).cmds).toEqual([{ kind: "notify", text: "read-only: book is processing", level: "error" }])
+    expect(press(s, ENTER).cmds[0]).toMatchObject({ kind: "notify" })
+  })
+  test("footer shows fixes hints without daemon keys", () => {
+    const f = footerHints(opened())
+    expect(f.left).toContain("␣ toggle")
+    expect(f.right).toEqual([])
+  })
+  test("daemon keys are not active on the fixes screen", () => {
+    const s = opened()
+    expect(press(s, k("d")).cmds).toEqual([])
+    expect(press(s, k("p")).cmds).toEqual([])
+  })
+  test("space or enter on a ? fix steps the cursor to the next ? fix", () => {
+    const more: FixesData = { ...FDATA, fixes: [fix("0007-1", "reverted"), fix("0046-1", "applied", true), fix("0075-1", "applied"),
+      fix("0130-1", "applied", true)] }
+    const s = opened(more)
+    const at = (id: string) => ({ ...s, fixes: { ...s.fixes!, cursorId: id } })
+    let r = press(at("0046-1"), SPACE)
+    expect(r.cmds).toEqual([{ kind: "fixSet", book: s.bookName, id: "0046-1", applied: false }])
+    expect(r.s.fixes!.cursorId).toBe("0130-1")
+    r = press(at("0046-1"), ENTER)
+    expect(r.cmds).toEqual([{ kind: "fixKeep", book: s.bookName, id: "0046-1" }])
+    expect(r.s.fixes!.cursorId).toBe("0130-1")
+    r = press(at("0130-1"), SPACE)                                        // wraps around
+    expect(r.s.fixes!.cursorId).toBe("0046-1")
+    r = press(at("0075-1"), SPACE)                                        // not a "?": the cursor stays
+    expect(r.cmds[0]).toMatchObject({ kind: "fixSet" })
+    expect(r.s.fixes!.cursorId).toBe("0075-1")
+  })
+  test("the only ? fix: the cursor stays; read-only does not move it", () => {
+    const s = press(opened(), k("n")).s
+    expect(press(s, SPACE).s.fixes!.cursorId).toBe("0046-1")
+    expect(press(s, ENTER).s.fixes!.cursorId).toBe("0046-1")
+    const ro = press(opened({ ...FDATA, editable: false, why_not: "x" }), k("n")).s
+    expect(press(ro, SPACE).s.fixes!.cursorId).toBe("0046-1")
   })
 })

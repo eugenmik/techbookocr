@@ -3,6 +3,7 @@ import { testRender } from "@opentui/solid"
 import { StatusStrip } from "../src/components/StatusStrip"
 import { ModalView } from "../src/screens/Modals"
 import { BookScreen } from "../src/screens/Book"
+import { FixesScreen } from "../src/screens/Fixes"
 import { Shell } from "../src/components/Shell"
 import { StageTable } from "../src/components/StageTable"
 import { SettingsScreen } from "../src/screens/Settings"
@@ -468,4 +469,136 @@ test("stage table: progress of a big book fits the last column, ETA stays right-
   const eta = lines.find((l) => l.includes("ETA"))!
   expect(head.trimEnd().length).toBe(row.trimEnd().length)   // the s/pp header is right-aligned with the column
   expect(eta.trimEnd().length).toBe(row.trimEnd().length)    // ETA sits under the last column
+})
+
+const FIXDATA = { fixes: [
+  { id: "0046-1", scan: "0046", page: "34", block: 3, kind: "table", was: "Specific load (t/mm)", now: "Specific load (t mm)",
+    state: "reverted", suggested: false, reason: "changes operator", decided_by: "rule",
+    before: "<td>Roll speed (m/min)</td><td>", after: "</td></tr></thead>" },
+  { id: "0075-1", scan: "0075", page: "153", block: null, kind: null, was: "Каток — 2 шт.", now: "Кагок — 2 шт.",
+    state: "applied", suggested: true, reason: "replaces dictionary word", decided_by: "model", before: "", after: "" }],
+  counts: { applied: 0, reverted: 1, suggested: 1, not_found: 0 }, editable: true, why_not: null } as any
+
+function fixesState(w: number, h: number, data: any = FIXDATA) {
+  const s = stateWith(LIBRARY, w, h)
+  return { ...s, screen: "fixes" as const, fixes: { book: s.bookName!, data, cursorId: "0046-1", filter: "all" as const, back: "book" as const } }
+}
+
+test("fixes screen at 120×30: list, reason column, context with brackets", async () => {
+  const f = await frame(() => <FixesScreen state={fixesState(120, 30)} theme={makeTheme({})} />, 118, 23)
+  expect(f).toContain("Fixes 2 · applied 0 · printed 1 · to review 1 · not found 0")
+  expect(f).toContain("↶")
+  expect(f).toContain("changes operator")
+  expect(f).toContain("Roll speed (m/min) │ ⟦Specific load (t/mm)⟧")
+  expect(f).toContain("now: Specific load (t mm)")
+  expect(f).toContain("Кагок — 2 шт.")
+})
+
+test("fixes screen at 80×24 hides the reason column; read-only header; NO_COLOR keeps brackets", async () => {
+  const ro = { ...FIXDATA, editable: false, why_not: "book is processing" }
+  const f = await frame(() => <FixesScreen state={fixesState(80, 24, ro)} theme={makeTheme({ NO_COLOR: "1" })} />, 78, 17)
+  expect(f).toContain("read-only: book is processing")
+  expect(f).not.toContain("replaces dictionary word  ")                // no reason column
+  expect(f).toContain("⟦Specific load (t/mm)⟧")
+})
+
+test("fixes screen shows the journal error instead of 'building', with a back hint", async () => {
+  const st = fixesState(120, 30, null)
+  st.fixes = { ...st.fixes, error: "book.md is missing" } as any
+  const f = await frame(() => <FixesScreen state={st} theme={makeTheme({})} />, 118, 23)
+  expect(f).toContain("book.md is missing")
+  expect(f).toContain("Esc back")
+  expect(f).not.toContain("building fix journal")
+  const wait = await frame(() => <FixesScreen state={fixesState(120, 30, null)} theme={makeTheme({})} />, 118, 23)
+  expect(wait).toContain("building fix journal")
+})
+
+test("fixes error is drawn in the err colour", async () => {
+  const st = fixesState(120, 30, null)
+  st.fixes = { ...st.fixes, error: "boom" } as any
+  const theme = makeTheme({})
+  setup = await testRender(() => <FixesScreen state={st} theme={theme} />, { width: 118, height: 23 })
+  await setup.renderOnce()
+  const lines = setup.captureSpans().lines
+  const sp = lines.flatMap((l) => l.spans).find((x) => x.text.includes("boom"))!
+  expect(near(sp.fg, theme.err!)).toBe(true)
+})
+
+test("help modal lists the Fixes keys", async () => {
+  const st = { ...stateWith(LIBRARY, 120, 100), modal: { kind: "help" } as any }
+  const f = await frame(() => <ModalView state={st} theme={makeTheme({})} />, 118, 93)
+  expect(f).toContain("toggle fix ⇄ printed text")
+  expect(f).toContain("next fix to review")
+})
+
+test("book card shows the fix summary", async () => {
+  const s = stateWith(LIBRARY, 120, 30)
+  const st = { ...s, book: { ...s.book!, fixes: { total: 25, suggested: 3, reviewed: false } } }
+  const f = await frame(() => <QueueScreen state={st} theme={makeTheme({})} />, 118, 23)
+  expect(f).toContain("Fixes 25 · 3 to review · f")
+})
+
+// ---- review round 1: Fixes screen layout ----
+const MANY = {
+  fixes: Array.from({ length: 30 }, (_, i) => ({
+    id: `f${i}`, scan: `00${i}`, page: String(i + 3), block: 1, kind: "table", was: `Specific load ${i} (t/mm)`,
+    now: `Specific load ${i} (t mm)`, state: i % 3 === 0 ? "reverted" : "applied", suggested: i % 3 === 1,
+    reason: "changes operator", decided_by: "rule",
+    before: "<tr><td>a</td><td>b</td></tr><tr><td>c</td><td>", after: "</td></tr><tr><td>x</td></tr><tr><td>y</td></tr>" })),
+  counts: { applied: 20, reverted: 10, suggested: 10, not_found: 0 }, editable: false, why_not: "book is processing" } as any
+
+for (const [w, h] of [[120, 30], [80, 24]] as const) {
+  test(`fixes screen ${w}×${h}: 30 fixes, 3-line context, read-only fits the body`, async () => {
+    const st = fixesState(w, h, MANY)
+    st.fixes = { ...st.fixes, cursorId: "f10" }
+    const f = await frame(() => <FixesScreen state={st} theme={makeTheme({})} />, w - 2, h - 7)
+    const rows = f.split("\n")
+    expect(rows[0]).toContain("‹ Book")
+    expect(rows[0]).toContain("Гиршович")
+    expect(rows[1].trim()).toStartWith("Fixes 30")
+    expect(rows[2]).toContain("read-only: book is processing")
+    expect(rows[3]).toStartWith("Fixes")
+    const ctx = rows.findIndex((r) => r.startsWith("Context ·"))
+    expect(ctx).toBeGreaterThan(0)
+    expect(rows[ctx + 2]).toContain("a │ b")
+    expect(rows[ctx + 3]).toContain("⟦Specific load 10 (t mm)⟧")
+    expect(rows[ctx + 4]).toContain("x")
+    expect(rows[ctx + 5]).toContain("was: Specific load 10 (t/mm)")
+    const legend = rows.findIndex((r, i) => i > ctx && r.includes("not found") && r.includes("applied") && r.includes("printed"))
+    expect(legend).toBe(ctx + 6)
+    expect(rows.slice(legend + 1).join("").trim()).toBe("")
+    expect(legend).toBeLessThanOrEqual(h - 7 - 1)
+  })
+}
+
+test("fixes screen: long bracketed context is clipped to the width, brackets inside the text survive", async () => {
+  const st = fixesState(80, 24, MANY)
+  const fixes = MANY.fixes.map((x: any) => x.id === "f10"
+    ? { ...x, state: "reverted", suggested: false, was: "AB⟦CD", before: "q".repeat(120), after: "z".repeat(120) } : x)
+  st.fixes = { ...st.fixes, cursorId: "f10", data: { ...MANY, fixes } }
+  const f = await frame(() => <FixesScreen state={st} theme={makeTheme({})} />, 78, 17)
+  const rows = f.split("\n")
+  const ctx = rows.findIndex((r) => r.startsWith("Context ·"))
+  expect(ctx).toBeGreaterThan(0)
+  expect(rows[ctx + 2]).toContain("⟦AB⟦CD⟧")
+  expect(rows[ctx + 2]).toContain("…")
+  expect(strWidth(rows[ctx + 2].trimEnd())).toBeLessThanOrEqual(78)
+  expect(rows[ctx + 3]).toContain("now:")
+  const legend = rows.findIndex((r, i) => i > ctx && r.includes("not found") && r.includes("applied"))
+  expect(legend).toBe(ctx + 4)
+})
+
+test("fixes header shows the screen it returns to", async () => {
+  const st = fixesState(120, 30)
+  const f = await frame(() => <FixesScreen state={{ ...st, fixes: { ...st.fixes, back: "queue" as any } }} theme={makeTheme({})} />, 118, 23)
+  expect(f.split("\n")[0]).toStartWith("‹ Queue")
+})
+
+test("book header with the fix summary does not wrap at 80 columns", async () => {
+  const s = stateWith(LIBRARY, 80, 24)
+  const st = { ...s, book: { ...s.book!, fixes: { total: 25, suggested: 3, reviewed: false } } }
+  const f = await frame(() => <BookScreen state={st} theme={makeTheme({})} />, 78, 17)
+  const rows = f.split("\n")
+  expect(rows[1]).toContain("Fixes 25")
+  expect(rows[2].trim()).toStartWith("Stages")
 })

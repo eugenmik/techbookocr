@@ -1,5 +1,6 @@
 import { Match, Show, Switch } from "solid-js"
 import { BookScreen } from "../screens/Book"
+import { FixesScreen } from "../screens/Fixes"
 import { ModalView } from "../screens/Modals"
 import { QueueScreen } from "../screens/Queue"
 import { SettingsScreen } from "../screens/Settings"
@@ -36,6 +37,7 @@ export function Shell(props: { state: AppState; theme: Theme }) {
               <Match when={s().modal}><ModalView state={s()} theme={props.theme} /></Match>
               <Match when={s().screen === "queue"}><QueueScreen state={s()} theme={props.theme} /></Match>
               <Match when={s().screen === "book"}><BookScreen state={s()} theme={props.theme} /></Match>
+              <Match when={s().screen === "fixes" && s().fixes}><FixesScreen state={s()} theme={props.theme} /></Match>
               <Match when={s().screen === "telemetry"}><TelemetryScreen state={s()} theme={props.theme} /></Match>
               <Match when={s().screen === "settings"}><SettingsScreen state={s()} theme={props.theme} /></Match>
             </Switch>
